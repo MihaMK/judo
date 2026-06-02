@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="Охридско езеро и џудо клуб">
+  <defs>
+    <linearGradient id="sky" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="0.42" stop-color="#1e3a4b"/>
+      <stop offset="1" stop-color="#d6a84f"/>
+    </linearGradient>
+    <linearGradient id="lake" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#102033"/>
+      <stop offset="0.5" stop-color="#16445f"/>
+      <stop offset="1" stop-color="#0f2538"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="72%" cy="28%" r="34%">
+      <stop offset="0" stop-color="#f6d992" stop-opacity="0.85"/>
+      <stop offset="0.42" stop-color="#d6a84f" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#d6a84f" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+  </defs>
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <rect width="1600" height="900" fill="url(#sun)"/>
+  <path d="M0 470 C220 410 360 430 520 375 C700 315 875 335 1045 280 C1225 225 1390 230 1600 170 L1600 900 L0 900Z" fill="#09111f" opacity="0.72"/>
+  <path d="M0 538 C220 490 385 508 565 468 C745 428 920 445 1100 402 C1290 356 1440 365 1600 315 L1600 900 L0 900Z" fill="#142235" opacity="0.76"/>
+  <rect y="560" width="1600" height="340" fill="url(#lake)"/>
+  <path d="M0 598 C260 570 360 620 600 590 C790 566 990 602 1160 580 C1340 555 1450 584 1600 560" fill="none" stroke="#f8fafc" stroke-opacity="0.15" stroke-width="3"/>
+  <path d="M120 665 C360 632 520 687 760 652 C980 620 1160 675 1500 640" fill="none" stroke="#f8fafc" stroke-opacity="0.09" stroke-width="2"/>
+  <path d="M0 765 C250 725 465 760 700 735 C975 705 1190 760 1600 725 L1600 900 L0 900Z" fill="#080f1b" opacity="0.74"/>
+  <g opacity="0.22" filter="url(#blur)">
+    <circle cx="220" cy="210" r="120" fill="#f6d992"/>
+    <circle cx="1240" cy="190" r="160" fill="#f8fafc"/>
+  </g>
+  <g transform="translate(1150 555)" opacity="0.24">
+    <path d="M0 190 L85 0 L170 190" fill="none" stroke="#f8fafc" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M45 104 H125" stroke="#f8fafc" stroke-width="18" stroke-linecap="round"/>
+  </g>
+  <rect width="1600" height="900" fill="#020617" opacity="0.18"/>
+</svg>
