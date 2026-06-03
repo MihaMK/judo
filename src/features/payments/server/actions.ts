@@ -1,20 +1,20 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { getSessionContext } from "@/features/auth/server/session";
 import { calculateMonthsCovered, PAYMENT_METHODS, type PaymentMethod } from "../domain/payment";
 import { getAthleteMembershipSummary, isMembershipSchemaMissingError } from "./payment-read-models";
+import { createPaymentRecord } from "./payment-persistence";
 
-export type MembershipPaymentActionState = {
+export type PaymentActionState = {
   ok?: boolean;
   message?: string;
 };
 
-export async function createMembershipPaymentAction(
-  _previousState: MembershipPaymentActionState,
+export async function createPayment(
+  _previousState: PaymentActionState,
   formData: FormData
-): Promise<MembershipPaymentActionState> {
+): Promise<PaymentActionState> {
   const sessionContext = await getSessionContext();
 
   if (!sessionContext.isAuthenticated || !sessionContext.userProfileId || !sessionContext.clubId) {
@@ -57,26 +57,21 @@ export async function createMembershipPaymentAction(
   }
 
   try {
-    const admin = createAdminSupabaseClient();
-    const { error } = await admin.from("membership_payments").insert({
-      club_id: sessionContext.clubId,
-      athlete_id: athleteId,
+    await createPaymentRecord({
+      clubId: sessionContext.clubId,
+      athleteId,
       amount,
-      payment_method: paymentMethod,
-      payment_date: paymentDate,
-      created_by_user_profile_id: sessionContext.userProfileId
+      paymentMethod,
+      paymentDate,
+      createdBy: sessionContext.userProfileId
     });
-
-    if (error) {
-      if (isMembershipSchemaMissingError(error)) {
-        return { message: "Membership schema не е подготвена. Применете ја миграцијата за членарини.", ok: false };
-      }
-
-      return { message: `Уплатата не е зачувана: ${error.message}`, ok: false };
-    }
   } catch (error) {
+    if (isMembershipSchemaMissingError(error)) {
+      return { message: "Табелата за уплати не е достапна. Проверете ја Supabase конфигурацијата.", ok: false };
+    }
+
     return {
-      message: error instanceof Error ? error.message : "Уплатата не е зачувана.",
+      message: error instanceof Error ? `Уплатата не е зачувана: ${error.message}` : "Уплатата не е зачувана.",
       ok: false
     };
   }

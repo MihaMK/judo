@@ -115,7 +115,11 @@ function calculateMonthsOverdue(paidThroughDate: string | null, currentMonth: st
 
   const firstUnpaid = addMonths(firstDayOfMonth(paidThroughDate), 1);
   const current = firstDayOfMonth(currentMonth);
-  const months = (current.getUTCFullYear() - firstUnpaid.getUTCFullYear()) * 12 + current.getUTCMonth() - firstUnpaid.getUTCMonth() + 1;
+  const months =
+    (current.getUTCFullYear() - firstUnpaid.getUTCFullYear()) * 12 +
+    current.getUTCMonth() -
+    firstUnpaid.getUTCMonth() +
+    1;
   return Math.max(months, 1);
 }
 

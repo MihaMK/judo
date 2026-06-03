@@ -2,7 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { Banknote, CheckCircle2, CreditCard, Search, ShieldAlert, UserPlus, Users } from "lucide-react";
-import { createMembershipPaymentAction, type MembershipPaymentActionState } from "@/features/payments/server/actions";
+import { createPayment, type PaymentActionState } from "@/features/payments/server/actions";
 import { Avatar } from "@/shared/ui/avatar";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -29,7 +29,7 @@ type PaymentsWorkflowProps = {
 
 type FilterMode = "all" | "unpaid" | "paid";
 
-const initialState: MembershipPaymentActionState = {};
+const initialState: PaymentActionState = {};
 
 export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps) {
   const [query, setQuery] = useState("");
@@ -37,7 +37,7 @@ export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps)
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
-  const [state, formAction, isPending] = useActionState(createMembershipPaymentAction, initialState);
+  const [state, formAction, isPending] = useActionState(createPayment, initialState);
 
   const filteredAthletes = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("mk-MK");
@@ -86,7 +86,7 @@ export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps)
           icon={Users}
           label="Вкупно активни"
           value={athletes.length}
-          description="Активни спортисти од постоечкиот athlete модел."
+          description="Активни спортисти во тековниот клуб."
         />
       </section>
 
@@ -94,14 +94,17 @@ export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps)
         <CardContent className="p-md">
           <div className="flex flex-col gap-md lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <Badge tone="primary">Real persistence</Badge>
+              <Badge tone="primary">Перзистентни уплати</Badge>
               <p className="mt-sm text-body text-muted-foreground">
-                Членарините се пресметуваат од зачувани уплати и месечна членарина.
+                Статусот се пресметува од зачуваните уплати во табелата payments и месечна членарина од 1.000 ден.
               </p>
             </div>
             <div className="flex flex-col gap-sm sm:flex-row sm:items-center">
               <div className="relative min-w-0 sm:w-80">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
@@ -237,13 +240,13 @@ function PaymentAthleteCard({
             <h3 className="truncate text-body font-semibold text-foreground">{athlete.fullName}</h3>
             <div className="mt-xs flex flex-wrap items-center gap-xs text-caption text-muted-foreground">
               <span>{athlete.groupName}</span>
-              <span aria-hidden="true">·</span>
+              <span aria-hidden="true">/</span>
               <span>{athlete.guardianNames[0] ?? "Нема родител/старател"}</span>
             </div>
             <p className="mt-xs text-sm font-medium text-foreground">
               {paid && athlete.membership.paidThroughLabel
                 ? `Платено до ${athlete.membership.paidThroughLabel}`
-                : `Доцни ${athlete.membership.monthsOverdue} месец${athlete.membership.monthsOverdue === 1 ? "" : "и"}`}
+                : `Доцни ${athlete.membership.monthsOverdue} ${athlete.membership.monthsOverdue === 1 ? "месец" : "месеци"}`}
             </p>
           </div>
         </div>
@@ -274,7 +277,7 @@ function PaymentEntryPanel({
   amount: string;
   paymentMethod: PaymentMethod;
   canCreate: boolean;
-  state: MembershipPaymentActionState;
+  state: PaymentActionState;
   isPending: boolean;
   formAction: (formData: FormData) => void;
   onAmountChange: (value: string) => void;
@@ -285,14 +288,15 @@ function PaymentEntryPanel({
   const monthlyFee = selectedAthlete?.membership.monthlyFee ?? 1000;
   const paidMonths = Number.isFinite(amountValue) && amountValue > 0 ? calculateMonthsCovered(amountValue, monthlyFee) : 0;
   const remainder = Number.isFinite(amountValue) && amountValue > 0 ? amountValue % monthlyFee : 0;
-  const previewPaidThrough = selectedAthlete && paidMonths > 0
-    ? calculatePaidThroughDate({
-        existingPaidThroughDate: selectedAthlete.membership.paidThroughDate,
-        paymentDate: getTodayDate(),
-        amount: amountValue,
-        monthlyFee
-      })
-    : null;
+  const previewPaidThrough =
+    selectedAthlete && paidMonths > 0
+      ? calculatePaidThroughDate({
+          existingPaidThroughDate: selectedAthlete.membership.paidThroughDate,
+          paymentDate: getTodayDate(),
+          amount: amountValue,
+          monthlyFee
+        })
+      : null;
   const previewPaidUntil = previewPaidThrough ? formatMonthLabel(previewPaidThrough) : "Нема цел месец";
 
   return (
@@ -356,13 +360,20 @@ function PaymentEntryPanel({
               <p className="mt-xs text-body text-muted-foreground">Платено до: {previewPaidUntil}</p>
               {remainder > 0 ? (
                 <p className="mt-sm text-sm text-warning-foreground">
-                  Ќе се евидентираат {paidMonths} месеци. Остатокот не се обработува во V1.
+                  Ќе се евидентираат {paidMonths} {paidMonths === 1 ? "месец" : "месеци"}. Остатокот не се обработува во V1.
                 </p>
               ) : null}
             </div>
 
             {state.message ? (
-              <p className={cn("rounded-card border p-sm text-sm", state.ok ? "border-success/60 bg-success text-success-foreground" : "border-warning/60 bg-warning text-warning-foreground")}>
+              <p
+                className={cn(
+                  "rounded-card border p-sm text-sm",
+                  state.ok
+                    ? "border-success/60 bg-success text-success-foreground"
+                    : "border-warning/60 bg-warning text-warning-foreground"
+                )}
+              >
                 {state.message}
               </p>
             ) : null}
@@ -380,7 +391,11 @@ function PaymentEntryPanel({
           <EmptyState
             icon={UserPlus}
             title={canCreate ? "Изберете спортист" : "Само за преглед"}
-            description={canCreate ? "Кликнете „Внеси уплата“ на спортист за да зачувате членарина." : "Родителскиот пристап е read-only за членарини."}
+            description={
+              canCreate
+                ? "Кликнете Внеси уплата на спортист за да зачувате членарина."
+                : "Родителскиот пристап е само за преглед на членарини."
+            }
           />
         )}
       </CardContent>
