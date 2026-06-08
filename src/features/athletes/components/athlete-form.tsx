@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useState } from "react";
+import { Camera, Image as ImageIcon } from "lucide-react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import type { AgeCategoryGroup, BeltRank } from "@/features/categories/domain/category";
 import { calculateAthleteCategory } from "@/features/athletes/server/category-logic";
 import type { AthleteFormState } from "@/features/athletes/server/actions";
@@ -36,6 +37,9 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
   const [birthDateInput, setBirthDateInput] = useState(athlete?.birthDate ? formatDateMk(athlete.birthDate) : "");
   const [gender, setGender] = useState<"M" | "Ж">(athlete?.gender ?? "M");
   const [weight, setWeight] = useState(athlete?.weight === null || athlete?.weight === undefined ? "" : String(athlete.weight));
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoCapture, setPhotoCapture] = useState(false);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [categoryPreview, setCategoryPreview] = useState({
     ageLabel: "",
     ageGroupLabel: "",
@@ -52,6 +56,13 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
         weightCategoryLabel: ""
       };
 
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) {
+        URL.revokeObjectURL(photoPreviewUrl);
+      }
+    };
+  }, [photoPreviewUrl]);
   useEffect(() => {
     let isCurrent = true;
     const parsedWeight = weight.trim() ? Number(weight) : null;
@@ -93,6 +104,25 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
     };
   }, [birthDate, gender, weight]);
 
+  function openPhotoInput(useCamera: boolean) {
+    setPhotoCapture(useCamera);
+    window.setTimeout(() => photoInputRef.current?.click(), 0);
+  }
+  function handlePhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const nextPreviewUrl = URL.createObjectURL(file);
+
+    if (photoPreviewUrl) {
+      URL.revokeObjectURL(photoPreviewUrl);
+    }
+
+    setPhotoPreviewUrl(nextPreviewUrl);
+  }
   return (
     <form action={formAction} className="mx-auto max-w-5xl space-y-lg">
       <Card variant="elevated" className="overflow-hidden">
@@ -101,11 +131,34 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
           <CardDescription>Опционална фотографија за профилот и брза идентификација.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-md p-md sm:flex-row sm:items-center">
-          <Avatar src={athlete?.photoUrl} name={athlete?.fullName ?? "Judo Drim"} size="xl" />
-          <div className="min-w-0 flex-1">
-            <FormField label="Избери фотографија" htmlFor="photo" error={state.fieldErrors?.photo} hint="JPEG, PNG или WEBP до 3MB.">
-              <Input id="photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-invalid={Boolean(state.fieldErrors?.photo)} />
-            </FormField>
+          <Avatar src={photoPreviewUrl ?? athlete?.photoUrl} name={athlete?.fullName ?? "Judo Drim"} size="xl" />
+          <div className="min-w-0 flex-1 space-y-sm">
+            <p className="text-sm font-semibold text-foreground">Избери фотографија</p>
+            <p className="text-caption text-muted-foreground">
+              Сликајте нова фотографија со камера или изберете постоечка од галерија.
+            </p>
+            <div className="grid gap-sm sm:grid-cols-2">
+              <Button type="button" variant="secondary" onClick={() => openPhotoInput(true)}>
+                <Camera className="h-4 w-4" aria-hidden="true" />
+                Сликај со камера
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => openPhotoInput(false)}>
+                <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                Избери од галерија
+              </Button>
+            </div>
+            <input
+              ref={photoInputRef}
+              name="photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              capture={photoCapture ? "environment" : undefined}
+              className="hidden"
+              onChange={handlePhotoChange}
+              aria-invalid={Boolean(state.fieldErrors?.photo)}
+            />
+            {state.fieldErrors?.photo ? <p className="text-caption text-danger-foreground">{state.fieldErrors.photo}</p> : null}
+            <p className="text-caption text-muted-foreground">JPEG, PNG или WEBP до 3MB.</p>
           </div>
         </CardContent>
       </Card>
