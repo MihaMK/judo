@@ -4,9 +4,6 @@ import {
   CalendarCheck,
   CreditCard,
   Edit3,
-  Mail,
-  MessageCircle,
-  Phone,
   Scale,
   ShieldAlert,
   Trophy,
@@ -16,47 +13,51 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { AthleteProfileDossier } from "@/features/athletes/server/athlete-profile-dossier";
+import { GuardianContactCard } from "@/features/athletes/components/guardian-contact-card";
 import { formatCurrency, formatPaymentMethod, type MembershipSummary } from "@/features/payments/domain/payment";
+import { WeightMeasurementForm } from "@/features/athletes/components/weight-measurement-form";
 import { Avatar } from "@/shared/ui/avatar";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { StatCard } from "@/shared/ui/stat-card";
-import type { AthleteProfileView, AthleteStatus, GuardianSummary } from "../domain/athlete";
+import { formatDateMk } from "@/shared/lib/date-format";
+import type { AthleteProfileView, AthleteStatus } from "../domain/athlete";
 
 type AthleteProfileShellProps = {
   athlete: AthleteProfileView;
   dossier: AthleteProfileDossier;
   canManage: boolean;
+  canRecordWeight?: boolean;
 };
 
-export function AthleteProfileShell({ athlete, dossier, canManage }: AthleteProfileShellProps) {
+export function AthleteProfileShell({ athlete, dossier, canManage, canRecordWeight = canManage }: AthleteProfileShellProps) {
   const guardian = athlete.guardians.find((item) => item.isPrimaryContact) ?? athlete.guardians[0] ?? null;
   const age = calculateAge(athlete.birthDate);
   const membershipStatus = getMembershipStatusLabel(dossier.membership);
 
   return (
     <div className="space-y-lg">
-      <HeroCard
-        athlete={athlete}
-        age={age}
-        ageGroupName={dossier.ageGroupName}
-        canManage={canManage}
-      />
+      <HeroCard athlete={athlete} age={age} ageGroupName={dossier.ageGroupName} canManage={canManage} />
 
       <section className="grid gap-sm md:grid-cols-4" aria-label="Брз преглед">
         <StatCard icon={CalendarCheck} label="Присуства (30 дена)" value={dossier.attendance.present30Days} />
         <StatCard icon={XCircle} label="Отсуства (30 дена)" value={dossier.attendance.absent30Days} />
-        <StatCard icon={Weight} label="Последна тежина" value="Нема податок" />
+        <StatCard icon={Weight} label="Последна тежина" value={athlete.weight == null ? "Нема податок" : `${athlete.weight} kg`} />
         <StatCard icon={CreditCard} label="Членарина" value={membershipStatus} />
       </section>
 
       <section className="grid gap-lg xl:grid-cols-[minmax(0,1fr)_390px]">
         <div className="space-y-lg">
-          <ContactCard guardian={guardian} />
-          <SportsCard athlete={athlete} ageGroupName={dossier.ageGroupName} />
+          <GuardianContactCard
+            athleteId={athlete.id}
+            athleteName={athlete.fullName}
+            guardian={guardian}
+            canManage={canManage}
+          />
+          <SportsCard athlete={athlete} ageGroupName={dossier.ageGroupName} weightCategoryName={dossier.weightCategoryName} />
           <AttendanceCard attendance={dossier.attendance} />
-          <WeightHistoryCard />
+          <WeightHistoryCard athlete={athlete} weightHistory={dossier.weightHistory} canRecord={canRecordWeight} />
         </div>
 
         <aside className="space-y-lg xl:sticky xl:top-24 xl:self-start">
@@ -85,7 +86,7 @@ function HeroCard({
         <div className="flex flex-col gap-lg lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-md sm:flex-row sm:items-center">
             <div className="relative w-fit">
-              <Avatar name={athlete.fullName} size="xl" className="h-24 w-24 border-gold/30 bg-slate-900 text-2xl text-gold" />
+              <Avatar src={athlete.photoUrl} name={athlete.fullName} size="xl" className="h-24 w-24 border-gold/30 bg-slate-900 text-2xl text-gold" />
               <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap">
                 <StatusMiniBadge status={athlete.status} />
               </span>
@@ -94,9 +95,11 @@ function HeroCard({
             <div className="min-w-0 pt-sm sm:pt-0">
               <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{athlete.fullName}</h1>
               <div className="mt-md grid gap-xs text-body text-slate-300">
-                <p>Појас: <span className="font-semibold text-white">{athlete.currentBelt}</span></p>
+                <p>
+                  Појас: <span className="font-semibold text-white">{athlete.currentBelt}</span>
+                </p>
                 <p>{ageGroupName}</p>
-                <p>{age} години</p>
+                <p>{age} години (натпреварувачка возраст)</p>
               </div>
             </div>
           </div>
@@ -116,43 +119,15 @@ function HeroCard({
   );
 }
 
-function ContactCard({ guardian }: { guardian: GuardianSummary | null }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Родител / Старател</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {guardian ? (
-          <div className="space-y-md">
-            <div className="rounded-card border border-border bg-muted/45 p-md">
-              <p className="text-section-title font-semibold text-foreground">{guardian.fullName}</p>
-              <div className="mt-sm grid gap-xs text-body text-muted-foreground">
-                <p>Телефон: <span className="font-medium text-foreground">{guardian.phone}</span></p>
-                <p>Email: <span className="font-medium text-foreground">{guardian.email ?? "Нема податок"}</span></p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-sm sm:grid-cols-4">
-              <ContactAction href={`tel:${guardian.phone}`} icon={Phone} label="Повикај" disabled={!guardian.phone} />
-              <ContactAction href={buildViberHref(guardian.phone)} icon={MessageCircle} label="Viber" disabled={!guardian.phone} />
-              <ContactAction href={buildWhatsAppHref(guardian.phone)} icon={MessageCircle} label="WhatsApp" disabled={!guardian.phone} />
-              <ContactAction href={guardian.email ? `mailto:${guardian.email}` : "#"} icon={Mail} label="Email" disabled={!guardian.email} />
-            </div>
-          </div>
-        ) : (
-          <EmptyState
-            icon={UserRound}
-            title="Нема поврзан родител"
-            description="Кога ќе се поврзе родител или старател, контактите ќе се појават овде."
-          />
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function SportsCard({ athlete, ageGroupName }: { athlete: AthleteProfileView; ageGroupName: string }) {
+function SportsCard({
+  athlete,
+  ageGroupName,
+  weightCategoryName
+}: {
+  athlete: AthleteProfileView;
+  ageGroupName: string;
+  weightCategoryName: string;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -161,9 +136,10 @@ function SportsCard({ athlete, ageGroupName }: { athlete: AthleteProfileView; ag
       <CardContent className="grid gap-sm sm:grid-cols-2">
         <InfoTile icon={Trophy} label="Појас" value={athlete.currentBelt} />
         <InfoTile icon={Activity} label="Група" value={athlete.group.name} />
-        <InfoTile icon={ShieldAlert} label="Возрастна група" value={ageGroupName} />
-        <InfoTile icon={UserRound} label="Пол" value="Неевидентирано" />
-        <InfoTile icon={Scale} label="Тежинска категорија" value="Ќе биде достапно во следна фаза" className="sm:col-span-2" />
+        <InfoTile icon={ShieldAlert} label="Возрасна група" value={ageGroupName} />
+        <InfoTile icon={Weight} label="Тежина" value={athlete.weight == null ? "" : `${athlete.weight} kg`} />
+        <InfoTile icon={UserRound} label="Пол" value={formatGender(athlete.gender)} />
+        <InfoTile icon={Scale} label="Тежинска категорија" value={weightCategoryName} className="sm:col-span-2" />
       </CardContent>
     </Card>
   );
@@ -181,7 +157,7 @@ function MembershipCard({ membership }: { membership: MembershipSummary }) {
           <p className="mt-sm text-body text-muted-foreground">
             {membership.status === "paid" && membership.paidThroughLabel
               ? `Платено до: ${membership.paidThroughLabel}`
-              : `Доцни: ${membership.monthsOverdue} месец${membership.monthsOverdue === 1 ? "" : "и"}`}
+              : `Доцни: ${membership.monthsOverdue} ${membership.monthsOverdue === 1 ? "месец" : "месеци"}`}
           </p>
         </div>
         <div className="rounded-card border border-border bg-surface p-md">
@@ -190,7 +166,7 @@ function MembershipCard({ membership }: { membership: MembershipSummary }) {
             <div className="mt-sm grid gap-xs">
               {membership.recentPayments.map((payment) => (
                 <div key={payment.id} className="flex items-center justify-between gap-md text-body">
-                  <span className="text-foreground">{formatDate(payment.paymentDate)}</span>
+                  <span className="text-foreground">{formatDateMk(payment.paymentDate)}</span>
                   <span className="text-right font-semibold text-foreground">{formatCurrency(payment.amount)}</span>
                   <span className="hidden text-caption text-muted-foreground sm:inline">{formatPaymentMethod(payment.paymentMethod)}</span>
                 </div>
@@ -238,7 +214,7 @@ function AttendanceCard({ attendance }: { attendance: AthleteProfileDossier["att
                 <div className="mt-sm grid gap-xs">
                   {attendance.recent.map((record) => (
                     <div key={`${record.date}-${record.status}`} className="flex items-center justify-between text-body">
-                      <span className="text-foreground">{formatDate(record.date)}</span>
+                      <span className="text-foreground">{formatDateMk(record.date)}</span>
                       <span className={record.status === "present" ? "text-success-foreground" : "text-danger-foreground"}>
                         {record.status === "present" ? "✓" : "✕"}
                       </span>
@@ -264,25 +240,53 @@ function AttendanceCard({ attendance }: { attendance: AthleteProfileDossier["att
   );
 }
 
-function WeightHistoryCard() {
+function WeightHistoryCard({
+  athlete,
+  weightHistory,
+  canRecord
+}: {
+  athlete: AthleteProfileView;
+  weightHistory: AthleteProfileDossier["weightHistory"];
+  canRecord: boolean;
+}) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Историја на тежини</CardTitle>
       </CardHeader>
       <CardContent className="space-y-md">
-        <EmptyState
-          icon={Weight}
-          title="Нема внесени мерења"
-          description="Историјата на тежини бара посебен persistence модел и ќе биде додадена во следна фаза."
-        />
-        <button
-          type="button"
-          disabled
-          className="inline-flex min-h-control w-full items-center justify-center rounded-button border border-border bg-muted px-4 text-sm font-semibold text-muted-foreground"
-        >
-          Додади мерење
-        </button>
+        {!weightHistory.available ? (
+          <EmptyState
+            icon={Weight}
+            title="Историјата не е достапна"
+            description="Применете ја миграцијата за мерења за да се зачувува историја на тежини."
+          />
+        ) : weightHistory.recent.length > 0 ? (
+          <div className="grid gap-sm">
+            {weightHistory.recent.map((measurement) => (
+              <div key={measurement.id} className="rounded-card border border-border bg-muted/45 p-md">
+                <div className="flex items-center justify-between gap-md">
+                  <div>
+                    <p className="text-section-title font-semibold text-foreground">{formatWeight(measurement.weight)}</p>
+                    <p className="mt-xs text-caption text-muted-foreground">{formatDateMk(measurement.measuredAt)}</p>
+                  </div>
+                  <Weight className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+                </div>
+                {measurement.note ? <p className="mt-sm text-body text-muted-foreground">{measurement.note}</p> : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={Weight}
+            title="Нема внесени мерења"
+            description="Кога ќе се додаде првото мерење, историјата ќе се прикаже овде."
+          />
+        )}
+
+        {canRecord ? (
+          <WeightMeasurementForm athleteId={athlete.id} currentWeight={athlete.weight} />
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -337,47 +341,9 @@ function InfoTile({
   );
 }
 
-function ContactAction({
-  href,
-  icon: Icon,
-  label,
-  disabled
-}: {
-  href: string;
-  icon: LucideIcon;
-  label: string;
-  disabled: boolean;
-}) {
-  if (disabled) {
-    return (
-      <button
-        type="button"
-        disabled
-        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-button border border-border bg-muted px-3 text-sm font-semibold text-muted-foreground"
-      >
-        <Icon className="h-4 w-4" aria-hidden="true" />
-        {label}
-      </button>
-    );
-  }
-
-  return (
-    <a
-      href={href}
-      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-button border border-border bg-surface px-3 text-sm font-semibold text-foreground shadow-soft transition-colors duration-ui hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-    >
-      <Icon className="h-4 w-4" aria-hidden="true" />
-      {label}
-    </a>
-  );
-}
-
 function QuickAction({ href, icon: Icon, title }: { href: string; icon: LucideIcon; title: string }) {
   return (
-    <Link
-      href={href}
-      className="flex min-h-14 items-center gap-md rounded-card border border-border bg-surface px-md text-left shadow-soft transition-all duration-ui hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-    >
+    <Link href={href} className="flex min-h-14 items-center gap-md rounded-card border border-border bg-surface px-md text-left shadow-soft transition-all duration-ui hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
       <Icon className="h-5 w-5 text-primary" aria-hidden="true" />
       <span className="font-semibold text-foreground">{title}</span>
     </Link>
@@ -402,44 +368,23 @@ function getStatusLabel(status: AthleteStatus) {
   return labels[status];
 }
 
+function formatGender(gender?: AthleteProfileView["gender"]) {
+  if (gender === "M") return "Машки";
+  if (gender === "Ж") return "Женски";
+  return "Нема внесен пол";
+}
+
 function getMembershipStatusLabel(membership: MembershipSummary) {
-  if (membership.status === "paid") {
-    return "Платено";
-  }
-
-  if (membership.status === "overdue") {
-    return "Доцни";
-  }
-
+  if (membership.status === "paid") return "Платено";
+  if (membership.status === "overdue") return "Доцни";
   return "Непознато";
 }
 
 function calculateAge(birthDate: string) {
   const birth = new Date(`${birthDate}T00:00:00Z`);
-  const today = new Date();
-  let age = today.getUTCFullYear() - birth.getUTCFullYear();
-  const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
-  const dayDiff = today.getUTCDate() - birth.getUTCDate();
-
-  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
-    age -= 1;
-  }
-
-  return age;
+  return new Date().getUTCFullYear() - birth.getUTCFullYear();
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("mk-MK", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric"
-  }).format(new Date(`${value}T00:00:00Z`));
-}
-
-function buildWhatsAppHref(phone: string) {
-  return `https://wa.me/${phone.replace(/\D/g, "")}`;
-}
-
-function buildViberHref(phone: string) {
-  return `viber://chat?number=${phone.replace(/\D/g, "")}`;
+function formatWeight(value: number) {
+  return `${value.toLocaleString("mk-MK", { maximumFractionDigits: 1 })} kg`;
 }

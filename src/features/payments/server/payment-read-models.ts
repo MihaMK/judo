@@ -1,4 +1,5 @@
 import type { SessionContext } from "@/features/auth/domain/roles";
+import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { createServerSupabaseClient } from "@/services/supabase/server";
 import { isSupabaseConfigured } from "@/shared/config/env";
 import {
@@ -13,6 +14,7 @@ type AthleteRow = {
   id: string;
   full_name: string;
   current_group_id: string | null;
+  photo_path: string | null;
 };
 
 type TrainingGroupRow = {
@@ -41,7 +43,7 @@ export async function getPaymentAthletesView(sessionContext: SessionContext): Pr
 
   let athleteQuery = supabase
     .from("athletes")
-    .select("id, full_name, current_group_id")
+    .select("id, full_name, current_group_id, photo_path")
     .eq("club_id", sessionContext.clubId)
     .eq("status", "active")
     .is("deleted_at", null)
@@ -63,14 +65,15 @@ export async function getPaymentAthletesView(sessionContext: SessionContext): Pr
 
   const athleteRows = athletes as AthleteRow[];
   const athleteIds = athleteRows.map((athlete) => athlete.id);
-  const [groupsById, guardiansByAthleteId, paymentsByAthleteId] = await Promise.all([
+  const [groupsById, guardiansByAthleteId, paymentsByAthleteId, photoUrlByPath] = await Promise.all([
     loadGroupsById(sessionContext.clubId),
     loadGuardiansByAthleteId(
       sessionContext.clubId,
       athleteIds,
       sessionContext.role === "parent" ? sessionContext.parentGuardianIds : []
     ),
-    loadPaymentsByAthleteId(sessionContext.clubId, athleteIds)
+    loadPaymentsByAthleteId(sessionContext.clubId, athleteIds),
+    loadAthletePhotoUrlMap(athleteRows.map((athlete) => athlete.photo_path).filter(isPresent))
   ]);
 
   return athleteRows.map((athlete) => {
@@ -79,6 +82,7 @@ export async function getPaymentAthletesView(sessionContext: SessionContext): Pr
     return {
       id: athlete.id,
       fullName: athlete.full_name,
+      photoUrl: athlete.photo_path ? photoUrlByPath.get(athlete.photo_path) ?? null : null,
       groupName: athlete.current_group_id
         ? groupsById.get(athlete.current_group_id) ?? "Нераспределена група"
         : "Нераспределена група",
@@ -90,6 +94,32 @@ export async function getPaymentAthletesView(sessionContext: SessionContext): Pr
       })
     };
   });
+}
+
+async function loadAthletePhotoUrlMap(photoPaths: string[]) {
+  const uniquePaths = [...new Set(photoPaths)];
+
+  if (uniquePaths.length === 0) {
+    return new Map<string, string>();
+  }
+
+  try {
+    const admin = createAdminSupabaseClient();
+    const entries = await Promise.all(
+      uniquePaths.map(async (path) => {
+        const { data, error } = await admin.storage.from("athlete-photos").createSignedUrl(path, 60 * 60);
+        return error || !data?.signedUrl ? null : ([path, data.signedUrl] as const);
+      })
+    );
+
+    return new Map(entries.filter(isPresent));
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
 }
 
 export async function getAthleteMembershipSummary(input: {

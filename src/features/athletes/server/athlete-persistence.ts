@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from "@/services/supabase/server";
 import { isSupabaseConfigured } from "@/shared/config/env";
 import type {
   AthleteProfile,
+  AthleteGender,
   AthleteStatus,
   GuardianOption,
   GuardianRelationship,
@@ -14,11 +15,20 @@ type AthleteRow = {
   id: string;
   full_name: string;
   birth_date: string;
+  gender: AthleteGender | null;
   status: AthleteStatus;
   current_group_id: string | null;
+  belt_rank_id: string | null;
   current_belt_text: string;
+  weight: number | string | null;
+  photo_path: string | null;
   joined_at: string;
   profile_summary: string;
+};
+
+type BeltRankRow = {
+  id: string;
+  name: string;
 };
 
 type TrainingGroupRow = {
@@ -51,9 +61,12 @@ export type AthleteMutationInput = {
   clubId: string;
   fullName: string;
   birthDate: string;
+  gender: AthleteGender | null;
   status: AthleteStatus;
   currentGroupId: string | null;
+  beltRankId: string | null;
   currentBeltText: string;
+  weight: number | null;
   profileSummary: string;
 };
 
@@ -100,7 +113,7 @@ export async function loadPersistedAthletes(
 
   let athleteQuery = supabase
     .from("athletes")
-    .select("id, full_name, birth_date, status, current_group_id, current_belt_text, joined_at, profile_summary")
+    .select("id, full_name, birth_date, gender, status, current_group_id, belt_rank_id, current_belt_text, weight, photo_path, joined_at, profile_summary")
     .eq("club_id", clubId)
     .is("deleted_at", null)
     .order("full_name", { ascending: true });
@@ -119,9 +132,11 @@ export async function loadPersistedAthletes(
     throw new Error(`Unable to load athletes: ${athletesError.message}`);
   }
 
-  const athleteRows = athletes as AthleteRow[];
+  const athleteRows = athletes as unknown as AthleteRow[];
   const athleteIds = athleteRows.map((athlete) => athlete.id);
+  const beltRankMap = await loadBeltRankMap(supabase);
   const guardianMap = await loadGuardianMap(clubId, athleteIds, restrictToParentGuardians ? parentGuardianIds : []);
+  const photoUrlMap = await loadAthletePhotoUrlMap(athleteRows.map((athlete) => athlete.photo_path).filter(isPresent));
 
   return athleteRows.map((athlete) => {
     const fallbackGroupId = athlete.current_group_id ?? "unassigned";
@@ -131,14 +146,55 @@ export async function loadPersistedAthletes(
       fullName: athlete.full_name,
       birthDate: athlete.birth_date,
       birthYear: new Date(`${athlete.birth_date}T00:00:00`).getUTCFullYear(),
+      gender: isAthleteGender(athlete.gender) ? athlete.gender : null,
       status: athlete.status,
       groupId: fallbackGroupId,
-      currentBelt: localizeKnownAthleteText(athlete.current_belt_text),
+      beltRankId: athlete.belt_rank_id,
+      currentBelt: (athlete.belt_rank_id ? beltRankMap.get(athlete.belt_rank_id) : null) ?? localizeKnownAthleteText(athlete.current_belt_text),
+      weight: athlete.weight === null ? null : Number(athlete.weight),
+      photoUrl: athlete.photo_path ? photoUrlMap.get(athlete.photo_path) ?? null : null,
       joinedAt: athlete.joined_at,
       profileSummary: localizeKnownAthleteText(athlete.profile_summary),
       guardians: guardianMap.get(athlete.id) ?? []
     };
   });
+}
+
+async function loadBeltRankMap(supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>) {
+  const { data, error } = await supabase
+    .from("belt_ranks")
+    .select("id, name")
+    .eq("is_active", true)
+    .is("deleted_at", null)
+    .order("rank_order", { ascending: true });
+
+  if (error) {
+    return new Map<string, string>();
+  }
+
+  return new Map((data as BeltRankRow[]).map((rank) => [rank.id, rank.name]));
+}
+
+async function loadAthletePhotoUrlMap(photoPaths: string[]) {
+  const uniquePaths = [...new Set(photoPaths)];
+
+  if (uniquePaths.length === 0) {
+    return new Map<string, string>();
+  }
+
+  try {
+    const admin = createAdminSupabaseClient();
+    const entries = await Promise.all(
+      uniquePaths.map(async (path) => {
+        const { data, error } = await admin.storage.from("athlete-photos").createSignedUrl(path, 60 * 60);
+        return error || !data?.signedUrl ? null : ([path, data.signedUrl] as const);
+      })
+    );
+
+    return new Map(entries.filter(isPresent));
+  } catch {
+    return new Map<string, string>();
+  }
 }
 
 export async function loadGuardianOptions(clubId: string): Promise<GuardianOption[]> {
@@ -175,9 +231,12 @@ export async function createPersistedAthlete(input: AthleteMutationInput): Promi
       club_id: input.clubId,
       full_name: input.fullName,
       birth_date: input.birthDate,
+      gender: input.gender,
       status: input.status,
       current_group_id: input.currentGroupId,
+      belt_rank_id: input.beltRankId,
       current_belt_text: input.currentBeltText,
+      weight: input.weight,
       profile_summary: input.profileSummary
     })
     .select("id")
@@ -215,6 +274,31 @@ export async function createPersistedGuardian(input: {
   return data.id;
 }
 
+export async function updatePersistedGuardian(input: {
+  clubId: string;
+  guardianId: string;
+  fullName: string;
+  phone: string;
+  email: string | null;
+}): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin
+    .from("guardians")
+    .update({
+      full_name: input.fullName,
+      phone: input.phone,
+      email: input.email,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.guardianId)
+    .eq("club_id", input.clubId)
+    .is("deleted_at", null);
+
+  if (error) {
+    throw new Error(`Unable to update guardian: ${error.message}`);
+  }
+}
+
 export async function updatePersistedAthlete(athleteId: string, input: AthleteMutationInput): Promise<void> {
   const admin = createAdminSupabaseClient();
   const { error } = await admin
@@ -222,9 +306,12 @@ export async function updatePersistedAthlete(athleteId: string, input: AthleteMu
     .update({
       full_name: input.fullName,
       birth_date: input.birthDate,
+      gender: input.gender,
       status: input.status,
       current_group_id: input.currentGroupId,
+      belt_rank_id: input.beltRankId,
       current_belt_text: input.currentBeltText,
+      weight: input.weight,
       profile_summary: input.profileSummary,
       updated_at: new Date().toISOString()
     })
@@ -235,6 +322,68 @@ export async function updatePersistedAthlete(athleteId: string, input: AthleteMu
   if (error) {
     throw new Error(`Unable to update athlete: ${error.message}`);
   }
+}
+
+export async function updatePersistedAthletePhoto(input: {
+  clubId: string;
+  athleteId: string;
+  photoPath: string;
+}): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin
+    .from("athletes")
+    .update({
+      photo_path: input.photoPath,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.athleteId)
+    .eq("club_id", input.clubId)
+    .is("deleted_at", null);
+
+  if (error) {
+    throw new Error(`Unable to update athlete photo: ${error.message}`);
+  }
+}
+
+export async function createPersistedWeightMeasurement(input: {
+  clubId: string;
+  athleteId: string;
+  measuredAt: string;
+  weight: number;
+  note: string;
+  createdByUserProfileId: string;
+}): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  const { error: insertError } = await admin.from("athlete_weight_measurements").insert({
+    club_id: input.clubId,
+    athlete_id: input.athleteId,
+    measured_at: input.measuredAt,
+    weight: input.weight,
+    note: input.note,
+    created_by_user_profile_id: input.createdByUserProfileId
+  });
+
+  if (insertError) {
+    throw insertError;
+  }
+
+  const { error: updateError } = await admin
+    .from("athletes")
+    .update({
+      weight: input.weight,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.athleteId)
+    .eq("club_id", input.clubId)
+    .is("deleted_at", null);
+
+  if (updateError) {
+    throw updateError;
+  }
+}
+
+function isAthleteGender(value: string | null): value is AthleteGender {
+  return value === "M" || value === "Ж";
 }
 
 export async function linkPersistedGuardianToAthlete(input: {
@@ -378,4 +527,8 @@ function localizeKnownAthleteText(value: string) {
   };
 
   return translations[value] ?? value;
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
 }

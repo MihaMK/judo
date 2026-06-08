@@ -16,7 +16,7 @@ export default async function ManagementCategoriesPage() {
   return (
     <PageShell
       title="Категории и тежини"
-      description="Оперативна администрација на возрасни категории, тежински категории и годишни генерации."
+      description="Оперативна администрација на возрасни категории, тежински категории и основа за автоматска категоризација."
     >
       <CategoryManagementPanel groups={groups} />
     </PageShell>

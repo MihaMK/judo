@@ -1,12 +1,10 @@
-import { createServerSupabaseClient } from "@/services/supabase/server";
-import { isSupabaseConfigured } from "@/shared/config/env";
-import type { AgeCategoryGroup, CategoryType, WeightCategory, YearGenerationRule } from "../domain/category";
+import { createAdminSupabaseClient } from "@/services/supabase/admin";
+import { isServiceRoleConfigured, isSupabaseConfigured } from "@/shared/config/env";
+import type { AgeCategoryGroup, BeltRank, CategoryGender, WeightCategory } from "../domain/category";
 
 type AgeGroupRow = {
   id: string;
-  code: string;
   name: string;
-  category_type: CategoryType;
   min_age: number | null;
   max_age: number | null;
   display_order: number;
@@ -16,39 +14,43 @@ type AgeGroupRow = {
 type WeightRow = {
   id: string;
   age_group_id: string;
-  gender: "M" | "F";
-  label: string;
-  max_weight_kg: number | null;
-  is_open_ended: boolean;
+  gender: CategoryGender;
+  name: string;
+  min_weight: number | string | null;
+  max_weight: number | string | null;
   display_order: number;
   is_active: boolean;
 };
 
-type YearRuleRow = {
+type BeltRankRow = {
   id: string;
-  age_group_id: string;
-  label: string;
-  min_age: number | null;
-  max_age: number | null;
-  display_order: number;
+  name: string;
+  kyu_dan_value: number;
+  rank_order: number;
   is_active: boolean;
 };
 
 export async function getCategoryManagementView(clubId: string | null): Promise<AgeCategoryGroup[]> {
-  if (!clubId || !isSupabaseConfigured()) {
+  void clubId;
+
+  if (!isSupabaseConfigured() || !isServiceRoleConfigured()) {
     return [];
   }
 
-  const supabase = await createServerSupabaseClient();
-  const { data: ageGroups, error: ageGroupError } = await supabase
-    .from("competition_age_groups")
-    .select("id, code, name, category_type, min_age, max_age, display_order, is_active")
-    .eq("club_id", clubId)
+  const admin = createAdminSupabaseClient();
+  const { data: ageGroups, error: ageGroupError } = await admin
+    .from("age_groups")
+    .select("id, name, min_age, max_age, display_order, is_active")
     .is("deleted_at", null)
-    .order("display_order", { ascending: true });
+    .order("display_order", { ascending: true })
+    .order("name", { ascending: true });
 
   if (ageGroupError) {
-    throw new Error(`Unable to load age categories: ${ageGroupError.message}`);
+    if (isSemanticCategorySchemaMissingError(ageGroupError)) {
+      return [];
+    }
+
+    throw new Error(`Unable to load semantic age groups: ${ageGroupError.message}`);
   }
 
   const ageGroupRows = ageGroups as AgeGroupRow[];
@@ -58,73 +60,83 @@ export async function getCategoryManagementView(clubId: string | null): Promise<
     return [];
   }
 
-  const [{ data: weights, error: weightError }, { data: yearRules, error: yearRuleError }] = await Promise.all([
-    supabase
-      .from("competition_weight_categories")
-      .select("id, age_group_id, gender, label, max_weight_kg, is_open_ended, display_order, is_active")
-      .in("age_group_id", ageGroupIds)
-      .is("deleted_at", null)
-      .order("display_order", { ascending: true }),
-    supabase
-      .from("athlete_year_generation_rules")
-      .select("id, age_group_id, label, min_age, max_age, display_order, is_active")
-      .in("age_group_id", ageGroupIds)
-      .is("deleted_at", null)
-      .order("display_order", { ascending: true })
-  ]);
+  const { data: weights, error: weightError } = await admin
+    .from("weight_categories")
+    .select("id, age_group_id, gender, name, min_weight, max_weight, display_order, is_active")
+    .in("age_group_id", ageGroupIds)
+    .is("deleted_at", null)
+    .order("display_order", { ascending: true })
+    .order("name", { ascending: true });
 
   if (weightError) {
-    throw new Error(`Unable to load weight categories: ${weightError.message}`);
-  }
+    if (isSemanticCategorySchemaMissingError(weightError)) {
+      return ageGroupRows.map((group) => toAgeGroup(group, []));
+    }
 
-  if (yearRuleError) {
-    throw new Error(`Unable to load year generation rules: ${yearRuleError.message}`);
+    throw new Error(`Unable to load semantic weight categories: ${weightError.message}`);
   }
 
   const weightsByAgeGroup = groupByAgeGroup((weights as WeightRow[]).map(toWeightCategory));
-  const rulesByAgeGroup = groupByAgeGroup((yearRules as YearRuleRow[]).map(toYearRule));
 
-  return ageGroupRows.map((group) => ({
-    id: group.id,
-    code: group.code,
-    name: group.name,
-    categoryType: group.category_type,
-    minAge: group.min_age,
-    maxAge: group.max_age,
-    displayOrder: group.display_order,
-    isActive: group.is_active,
-    weights: weightsByAgeGroup.get(group.id) ?? [],
-    yearRules: rulesByAgeGroup.get(group.id) ?? []
+  return ageGroupRows.map((group) => toAgeGroup(group, weightsByAgeGroup.get(group.id) ?? []));
+}
+
+export async function getBeltRanksView(): Promise<BeltRank[]> {
+  if (!isSupabaseConfigured() || !isServiceRoleConfigured()) {
+    return [];
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("belt_ranks")
+    .select("id, name, kyu_dan_value, rank_order, is_active")
+    .is("deleted_at", null)
+    .order("rank_order", { ascending: true });
+
+  if (error) {
+    if (isSemanticCategorySchemaMissingError(error)) {
+      return [];
+    }
+
+    throw new Error(`Unable to load belt ranks: ${error.message}`);
+  }
+
+  return (data as BeltRankRow[]).map((rank) => ({
+    id: rank.id,
+    name: rank.name,
+    kyuDanValue: rank.kyu_dan_value,
+    rankOrder: rank.rank_order,
+    isActive: rank.is_active
   }));
 }
 
-function toWeightCategory(row: WeightRow): WeightCategory & { ageGroupId: string } {
+function toAgeGroup(row: AgeGroupRow, weights: WeightCategory[]): AgeCategoryGroup {
   return {
-    ageGroupId: row.age_group_id,
     id: row.id,
-    gender: row.gender,
-    label: row.label,
-    maxWeightKg: row.max_weight_kg,
-    isOpenEnded: row.is_open_ended,
-    displayOrder: row.display_order,
-    isActive: row.is_active
-  };
-}
-
-function toYearRule(row: YearRuleRow): YearGenerationRule & { ageGroupId: string } {
-  return {
-    ageGroupId: row.age_group_id,
-    id: row.id,
-    label: row.label,
+    name: row.name,
     minAge: row.min_age,
     maxAge: row.max_age,
     displayOrder: row.display_order,
+    isActive: row.is_active,
+    weights
+  };
+}
+
+function toWeightCategory(row: WeightRow): WeightCategory {
+  return {
+    id: row.id,
+    ageGroupId: row.age_group_id,
+    gender: row.gender,
+    name: row.name,
+    minWeight: row.min_weight === null ? null : Number(row.min_weight),
+    maxWeight: row.max_weight === null ? null : Number(row.max_weight),
+    displayOrder: row.display_order,
     isActive: row.is_active
   };
 }
 
-function groupByAgeGroup<T extends { ageGroupId: string }>(items: T[]) {
-  const grouped = new Map<string, T[]>();
+function groupByAgeGroup(items: WeightCategory[]) {
+  const grouped = new Map<string, WeightCategory[]>();
 
   for (const item of items) {
     const existing = grouped.get(item.ageGroupId) ?? [];
@@ -133,4 +145,17 @@ function groupByAgeGroup<T extends { ageGroupId: string }>(items: T[]) {
   }
 
   return grouped;
+}
+
+export function isSemanticCategorySchemaMissingError(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const possibleError = error as { code?: string; message?: string };
+  return (
+    possibleError.code === "PGRST205" ||
+    (typeof possibleError.message === "string" &&
+      ["age_groups", "weight_categories", "belt_ranks", "belt_rank_id"].some((name) => possibleError.message?.includes(name)))
+  );
 }

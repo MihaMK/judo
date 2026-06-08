@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useState } from "react";
-import type { AgeCategoryGroup } from "@/features/categories/domain/category";
+import { useActionState, useEffect, useState } from "react";
+import type { AgeCategoryGroup, BeltRank } from "@/features/categories/domain/category";
+import { calculateAthleteCategory } from "@/features/athletes/server/category-logic";
 import type { AthleteFormState } from "@/features/athletes/server/actions";
 import type { AthleteProfileView, TrainingGroup } from "../domain/athlete";
+import { Avatar } from "@/shared/ui/avatar";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card";
@@ -13,26 +15,101 @@ import { Input } from "@/shared/ui/input";
 import { Select } from "@/shared/ui/select";
 import { Textarea } from "@/shared/ui/textarea";
 import { mk } from "@/shared/i18n/mk";
+import { formatDateMk } from "@/shared/lib/date-format";
 
 type AthleteFormProps = {
   action: (previousState: AthleteFormState, formData: FormData) => Promise<AthleteFormState>;
   groups: TrainingGroup[];
   ageGroups: AgeCategoryGroup[];
+  beltRanks: BeltRank[];
   athlete?: AthleteProfileView;
 };
 
 const initialState: AthleteFormState = {};
-const beltOptions = ["Бел", "Жолт", "Портокалов", "Зелен", "Син", "Кафеав", "Црн"];
+const fallbackBeltOptions = ["Бел", "Жолт", "Портокалов", "Зелен", "Син", "Кафеав", "Црн"];
 
-export function AthleteForm({ action, groups, ageGroups, athlete }: AthleteFormProps) {
+export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: AthleteFormProps) {
+  void ageGroups;
   const [state, formAction, isPending] = useActionState(action, initialState);
   const nameParts = splitName(athlete?.fullName ?? "");
   const [birthDate, setBirthDate] = useState(athlete?.birthDate ?? "");
-  const agePreview = useMemo(() => getAgePreview(birthDate, ageGroups), [ageGroups, birthDate]);
+  const [birthDateInput, setBirthDateInput] = useState(athlete?.birthDate ? formatDateMk(athlete.birthDate) : "");
+  const [gender, setGender] = useState<"M" | "Ж">(athlete?.gender ?? "M");
+  const [weight, setWeight] = useState(athlete?.weight === null || athlete?.weight === undefined ? "" : String(athlete.weight));
+  const [categoryPreview, setCategoryPreview] = useState({
+    ageLabel: "",
+    ageGroupLabel: "",
+    weightCategoryLabel: ""
+  });
   const isEdit = Boolean(athlete);
+  const beltRankOptions = [...beltRanks].sort((first, second) => first.rankOrder - second.rankOrder);
+  const canResolveCategory = Boolean(parseDate(birthDate));
+  const visibleCategoryPreview = canResolveCategory
+    ? categoryPreview
+    : {
+        ageLabel: "",
+        ageGroupLabel: "",
+        weightCategoryLabel: ""
+      };
+
+  useEffect(() => {
+    let isCurrent = true;
+    const parsedWeight = weight.trim() ? Number(weight) : null;
+
+    if (!parseDate(birthDate)) {
+      return;
+    }
+
+    calculateAthleteCategory({
+      birthDate,
+      gender,
+      weight: parsedWeight !== null && Number.isFinite(parsedWeight) && parsedWeight > 0 ? parsedWeight : null
+    })
+      .then((result) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        setCategoryPreview({
+          ageLabel: result.age === null ? "" : `${result.age} години`,
+          ageGroupLabel: result.ageGroupName,
+          weightCategoryLabel: result.weightCategoryName
+        });
+      })
+      .catch(() => {
+        if (!isCurrent) {
+          return;
+        }
+
+        setCategoryPreview({
+          ageLabel: "",
+          ageGroupLabel: "",
+          weightCategoryLabel: ""
+        });
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [birthDate, gender, weight]);
 
   return (
     <form action={formAction} className="mx-auto max-w-5xl space-y-lg">
+      <Card variant="elevated" className="overflow-hidden">
+        <CardHeader className="border-b border-border bg-subdued/60">
+          <CardTitle>Фотографија</CardTitle>
+          <CardDescription>Опционална фотографија за профилот и брза идентификација.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-md p-md sm:flex-row sm:items-center">
+          <Avatar src={athlete?.photoUrl} name={athlete?.fullName ?? "Judo Drim"} size="xl" />
+          <div className="min-w-0 flex-1">
+            <FormField label="Избери фотографија" htmlFor="photo" error={state.fieldErrors?.photo} hint="JPEG, PNG или WEBP до 3MB.">
+              <Input id="photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-invalid={Boolean(state.fieldErrors?.photo)} />
+            </FormField>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card variant="elevated" className="overflow-hidden">
         <CardHeader className="border-b border-border bg-subdued/60">
           <div className="flex flex-col gap-sm sm:flex-row sm:items-center sm:justify-between">
@@ -40,7 +117,7 @@ export function AthleteForm({ action, groups, ageGroups, athlete }: AthleteFormP
               <CardTitle>Основни податоци</CardTitle>
               <CardDescription>Основни идентификациски податоци за спортистот.</CardDescription>
             </div>
-            <Badge tone="primary">System-driven age group</Badge>
+            <Badge tone="primary">Автоматска категорија</Badge>
           </div>
         </CardHeader>
         <CardContent className="grid gap-md p-md md:grid-cols-2">
@@ -52,34 +129,41 @@ export function AthleteForm({ action, groups, ageGroups, athlete }: AthleteFormP
             <Input id="lastName" name="lastName" defaultValue={nameParts.lastName} aria-invalid={Boolean(state.fieldErrors?.lastName)} />
           </FormField>
 
-          <FormField label="Пол" htmlFor="gender" hint="Полето бара athlete schema проширување и не се зачувува во V1.">
-            <Select id="gender" name="gender" disabled defaultValue="">
-              <option value="">Неевидентирано</option>
-              <option value="male">Машки</option>
-              <option value="female">Женски</option>
+          <FormField label="Пол" htmlFor="gender" error={state.fieldErrors?.gender} hint="Полот се користи за автоматска категоризација и се зачувува во профилот.">
+            <Select id="gender" name="gender" value={gender} onChange={(event) => setGender(event.target.value as "M" | "Ж")} aria-invalid={Boolean(state.fieldErrors?.gender)}>
+              <option value="M">Машки</option>
+              <option value="Ж">Женски</option>
             </Select>
           </FormField>
 
-          <FormField label="Датум на раѓање" htmlFor="birthDate" error={state.fieldErrors?.birthDate}>
+          <FormField label="Датум на раѓање" htmlFor="birthDateInput" error={state.fieldErrors?.birthDate} hint="Формат: dd.mm.yyyy">
+            <input type="hidden" name="birthDate" value={birthDate} />
             <Input
-              id="birthDate"
-              name="birthDate"
-              type="date"
-              value={birthDate}
-              onChange={(event) => setBirthDate(event.target.value)}
+              id="birthDateInput"
+              type="text"
+              inputMode="numeric"
+              value={birthDateInput}
+              onBlur={() => {
+                if (birthDate) {
+                  setBirthDateInput(formatDateMk(birthDate));
+                }
+              }}
+              onChange={(event) => {
+                const value = event.target.value;
+                setBirthDateInput(value);
+                setBirthDate(parseDisplayDate(value) ?? "");
+              }}
+              placeholder="10.05.2015"
               aria-invalid={Boolean(state.fieldErrors?.birthDate)}
             />
           </FormField>
 
           <div className="rounded-card border border-border bg-muted/45 p-md md:col-span-2">
             <p className="text-caption font-semibold uppercase tracking-[0.16em] text-muted-foreground">Автоматска пресметка</p>
-            <div className="mt-sm grid gap-sm sm:grid-cols-2">
-              <p className="text-body text-foreground">
-                Возраст: <span className="font-semibold">{agePreview.ageLabel}</span>
-              </p>
-              <p className="text-body text-foreground">
-                Возрасна група: <span className="font-semibold">{agePreview.groupLabel}</span>
-              </p>
+            <div className="mt-sm grid gap-sm md:grid-cols-3">
+              <ReadOnlyPreview label="Возраст" value={visibleCategoryPreview.ageLabel} />
+              <ReadOnlyPreview label="Возрасна група" value={visibleCategoryPreview.ageGroupLabel} />
+              <ReadOnlyPreview label="Тежинска категорија" value={visibleCategoryPreview.weightCategoryLabel} />
             </div>
           </div>
         </CardContent>
@@ -91,19 +175,41 @@ export function AthleteForm({ action, groups, ageGroups, athlete }: AthleteFormP
           <CardDescription>Оперативни податоци за група, појас и спортски контекст.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-md p-md md:grid-cols-2">
-          <FormField label="Тежина (kg)" htmlFor="weightKg" hint="Тежина не постои во тековната athlete schema и не се зачувува во V1.">
-            <Input id="weightKg" name="weightKg" type="number" min={0} step="0.1" disabled placeholder="Schema pending" />
+          <FormField label="Тежина (kg)" htmlFor="weight">
+            <Input
+              id="weight"
+              name="weight"
+              type="number"
+              min={0}
+              step="0.1"
+              value={weight}
+              onChange={(event) => setWeight(event.target.value)}
+              placeholder="Пр. 42.5"
+            />
           </FormField>
 
-          <FormField label="Појас" htmlFor="currentBelt">
-            <Select id="currentBelt" name="currentBelt" defaultValue={normalizeBelt(athlete?.currentBelt)}>
-              {beltOptions.map((belt) => (
-                <option key={belt} value={belt}>
-                  {belt}
-                </option>
-              ))}
-            </Select>
-          </FormField>
+          {beltRankOptions.length > 0 ? (
+            <FormField label="Појас" htmlFor="beltRankId">
+              <Select id="beltRankId" name="beltRankId" defaultValue={athlete?.beltRankId ?? ""}>
+                <option value="">Без внесен појас</option>
+                {beltRankOptions.map((rank) => (
+                  <option key={rank.id} value={rank.id}>
+                    {rank.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          ) : (
+            <FormField label="Појас" htmlFor="currentBelt">
+              <Select id="currentBelt" name="currentBelt" defaultValue={normalizeBelt(athlete?.currentBelt)}>
+                {fallbackBeltOptions.map((belt) => (
+                  <option key={belt} value={belt}>
+                    {belt}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
 
           <FormField label="Тренинг група" htmlFor="groupId">
             <Select id="groupId" name="groupId" defaultValue={athlete?.groupId ?? ""}>
@@ -123,10 +229,6 @@ export function AthleteForm({ action, groups, ageGroups, athlete }: AthleteFormP
             </Select>
           </FormField>
 
-          <FormField label="Фотографија" htmlFor="photo" className="md:col-span-2" hint="Photo upload бара storage/persistence модел и е намерно одложен.">
-            <Input id="photo" name="photo" type="file" accept="image/*" disabled />
-          </FormField>
-
           <FormField label="Белешки" htmlFor="notes" className="md:col-span-2" hint={mk.common.optional}>
             <Textarea id="notes" name="notes" defaultValue={athlete?.profileSummary ?? ""} />
           </FormField>
@@ -137,7 +239,7 @@ export function AthleteForm({ action, groups, ageGroups, athlete }: AthleteFormP
         <Card variant="elevated" className="overflow-hidden">
           <CardHeader className="border-b border-border bg-subdued/60">
             <CardTitle>Родител / Старател</CardTitle>
-            <CardDescription>Во V1 се внесува точно еден родител или старател како примарен контакт.</CardDescription>
+            <CardDescription>Во V1 се внесува точно еден примарен контакт.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-md p-md md:grid-cols-2">
             <FormField label="Име и презиме" htmlFor="guardianFullName" error={state.fieldErrors?.guardianFullName}>
@@ -174,6 +276,15 @@ export function AthleteForm({ action, groups, ageGroups, athlete }: AthleteFormP
   );
 }
 
+function ReadOnlyPreview({ label, value }: { label: string; value: string }) {
+  return (
+    <label className="block space-y-xs">
+      <span className="text-sm font-semibold text-muted-foreground">{label}</span>
+      <Input value={value} readOnly placeholder="" aria-label={label} />
+    </label>
+  );
+}
+
 function splitName(fullName: string) {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
 
@@ -187,57 +298,31 @@ function splitName(fullName: string) {
   };
 }
 
-function getAgePreview(birthDate: string, ageGroups: AgeCategoryGroup[]) {
-  if (ageGroups.length === 0) {
-    return {
-      ageLabel: calculateAge(birthDate) === null ? "Внесете датум" : `${calculateAge(birthDate)} години`,
-      groupLabel: "ќе се пресмета кога категориите се достапни"
-    };
+function parseDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
   }
 
-  const age = calculateAge(birthDate);
-
-  if (age === null) {
-    return { ageLabel: "Внесете датум", groupLabel: "Ќе се пресмета автоматски" };
-  }
-
-  const group = ageGroups.find((item) => {
-    if (!item.isActive) {
-      return false;
-    }
-
-    const matchesMin = item.minAge === null || age >= item.minAge;
-    const matchesMax = item.maxAge === null || age <= item.maxAge;
-    return matchesMin && matchesMax;
-  });
-
-  return {
-    ageLabel: `${age} години`,
-    groupLabel: group?.name ?? "Нема дефинирана категорија"
-  };
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function calculateAge(birthDate: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+function parseDisplayDate(value: string) {
+  const trimmed = value.trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return parseDate(trimmed) ? trimmed : null;
+  }
+
+  const match = /^(\d{2})[./](\d{2})[./](\d{4})$/.exec(trimmed);
+
+  if (!match) {
     return null;
   }
 
-  const birth = new Date(`${birthDate}T00:00:00Z`);
-
-  if (Number.isNaN(birth.getTime())) {
-    return null;
-  }
-
-  const today = new Date();
-  let age = today.getUTCFullYear() - birth.getUTCFullYear();
-  const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
-  const dayDiff = today.getUTCDate() - birth.getUTCDate();
-
-  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
-    age -= 1;
-  }
-
-  return age;
+  const [, day, month, year] = match;
+  const isoDate = `${year}-${month}-${day}`;
+  return parseDate(isoDate) ? isoDate : null;
 }
 
 function normalizeBelt(value?: string) {
@@ -245,5 +330,5 @@ function normalizeBelt(value?: string) {
     return "Бел";
   }
 
-  return beltOptions.includes(value) ? value : "Бел";
+  return fallbackBeltOptions.includes(value) ? value : "Бел";
 }

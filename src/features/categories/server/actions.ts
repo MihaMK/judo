@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { getSessionContext } from "@/features/auth/server/session";
+import { createAdminSupabaseClient } from "@/services/supabase/admin";
 
 type ActionState = {
   message?: string;
@@ -11,27 +11,24 @@ type ActionState = {
 
 export async function createAgeGroupAction(_previousState: ActionState, formData: FormData): Promise<ActionState> {
   const access = await assertManagementAccess();
-  if (!access.ok) return { message: access.message };
+  if (!access.ok) return { message: access.message, ok: false };
 
   const name = text(formData, "name");
-  const code = text(formData, "code") || slugify(name);
-  const categoryType = text(formData, "categoryType") || "general";
 
-  if (!name || !code) return { message: "Име и код се задолжителни." };
+  if (!name) {
+    return { message: "Името е задолжително.", ok: false };
+  }
 
   const admin = createAdminSupabaseClient();
-  const { error } = await admin.from("competition_age_groups").insert({
-    club_id: access.clubId,
+  const { error } = await admin.from("age_groups").insert({
     name,
-    code,
-    category_type: categoryType,
     min_age: numberOrNull(formData, "minAge"),
     max_age: numberOrNull(formData, "maxAge"),
     display_order: numberOrNull(formData, "displayOrder") ?? 100,
     is_active: true
   });
 
-  if (error) return { message: error.message };
+  if (error) return { message: error.message, ok: false };
   revalidatePath("/management/categories");
   return { ok: true, message: "Возрасната категорија е додадена." };
 }
@@ -42,27 +39,22 @@ export async function updateAgeGroupAction(formData: FormData) {
 
   const id = text(formData, "id");
   const name = text(formData, "name");
-  const code = text(formData, "code");
-  const categoryType = text(formData, "categoryType") || "general";
 
-  if (!id || !name || !code) return;
+  if (!id || !name) return;
 
   const admin = createAdminSupabaseClient();
-  const { error } = await admin
-    .from("competition_age_groups")
+  await admin
+    .from("age_groups")
     .update({
       name,
-      code,
-      category_type: categoryType,
       min_age: numberOrNull(formData, "minAge"),
       max_age: numberOrNull(formData, "maxAge"),
       display_order: numberOrNull(formData, "displayOrder") ?? 100,
       updated_at: new Date().toISOString()
     })
     .eq("id", id)
-    .eq("club_id", access.clubId);
+    .is("deleted_at", null);
 
-  if (error) return;
   revalidatePath("/management/categories");
 }
 
@@ -72,39 +64,38 @@ export async function toggleAgeGroupAction(formData: FormData) {
 
   const admin = createAdminSupabaseClient();
   await admin
-    .from("competition_age_groups")
+    .from("age_groups")
     .update({ is_active: text(formData, "isActive") !== "true", updated_at: new Date().toISOString() })
     .eq("id", text(formData, "id"))
-    .eq("club_id", access.clubId);
+    .is("deleted_at", null);
 
   revalidatePath("/management/categories");
 }
 
 export async function createWeightCategoryAction(_previousState: ActionState, formData: FormData): Promise<ActionState> {
   const access = await assertManagementAccess();
-  if (!access.ok) return { message: access.message };
+  if (!access.ok) return { message: access.message, ok: false };
 
   const ageGroupId = text(formData, "ageGroupId");
-  const label = text(formData, "label");
+  const name = text(formData, "name");
   const gender = text(formData, "gender");
 
-  if (!ageGroupId || !label || !["M", "F"].includes(gender)) {
-    return { message: "Категорија, пол и ознака се задолжителни." };
+  if (!ageGroupId || !name || !["M", "Ж"].includes(gender)) {
+    return { message: "Категорија, пол и назив се задолжителни.", ok: false };
   }
 
   const admin = createAdminSupabaseClient();
-  const { error } = await admin.from("competition_weight_categories").insert({
-    club_id: access.clubId,
+  const { error } = await admin.from("weight_categories").insert({
     age_group_id: ageGroupId,
     gender,
-    label,
-    max_weight_kg: numberOrNull(formData, "maxWeightKg"),
-    is_open_ended: text(formData, "isOpenEnded") === "on",
+    name,
+    min_weight: numberOrNull(formData, "minWeight"),
+    max_weight: numberOrNull(formData, "maxWeight"),
     display_order: numberOrNull(formData, "displayOrder") ?? 100,
     is_active: true
   });
 
-  if (error) return { message: error.message };
+  if (error) return { message: error.message, ok: false };
   revalidatePath("/management/categories");
   return { ok: true, message: "Тежинската категорија е додадена." };
 }
@@ -114,28 +105,27 @@ export async function updateWeightCategoryAction(formData: FormData) {
   if (!access.ok) return;
 
   const id = text(formData, "id");
-  const label = text(formData, "label");
+  const name = text(formData, "name");
   const gender = text(formData, "gender");
 
-  if (!id || !label || !["M", "F"].includes(gender)) {
+  if (!id || !name || !["M", "Ж"].includes(gender)) {
     return;
   }
 
   const admin = createAdminSupabaseClient();
-  const { error } = await admin
-    .from("competition_weight_categories")
+  await admin
+    .from("weight_categories")
     .update({
       gender,
-      label,
-      max_weight_kg: numberOrNull(formData, "maxWeightKg"),
-      is_open_ended: text(formData, "isOpenEnded") === "on",
+      name,
+      min_weight: numberOrNull(formData, "minWeight"),
+      max_weight: numberOrNull(formData, "maxWeight"),
       display_order: numberOrNull(formData, "displayOrder") ?? 100,
       updated_at: new Date().toISOString()
     })
     .eq("id", id)
-    .eq("club_id", access.clubId);
+    .is("deleted_at", null);
 
-  if (error) return;
   revalidatePath("/management/categories");
 }
 
@@ -145,15 +135,15 @@ export async function toggleWeightCategoryAction(formData: FormData) {
 
   const admin = createAdminSupabaseClient();
   await admin
-    .from("competition_weight_categories")
+    .from("weight_categories")
     .update({ is_active: text(formData, "isActive") !== "true", updated_at: new Date().toISOString() })
     .eq("id", text(formData, "id"))
-    .eq("club_id", access.clubId);
+    .is("deleted_at", null);
 
   revalidatePath("/management/categories");
 }
 
-async function assertManagementAccess(): Promise<{ ok: true; clubId: string } | { ok: false; message: string }> {
+async function assertManagementAccess(): Promise<{ ok: true } | { ok: false; message: string }> {
   const sessionContext = await getSessionContext();
 
   if (!sessionContext.isAuthenticated || !sessionContext.userProfileId || !sessionContext.clubId) {
@@ -164,7 +154,7 @@ async function assertManagementAccess(): Promise<{ ok: true; clubId: string } | 
     return { ok: false, message: "Само управата може да уредува категории." };
   }
 
-  return { ok: true, clubId: sessionContext.clubId };
+  return { ok: true };
 }
 
 function text(formData: FormData, key: string) {
@@ -176,8 +166,4 @@ function numberOrNull(formData: FormData, key: string) {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function slugify(value: string) {
-  return value.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9а-шѓќљњџчјжѕ-]+/g, "");
 }

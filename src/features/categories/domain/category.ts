@@ -1,34 +1,30 @@
-export type CategoryType = "youth" | "senior" | "veteran" | "general";
-export type CategoryGender = "M" | "F";
+export type CategoryGender = "M" | "Ж";
 
 export type WeightCategory = {
   id: string;
+  ageGroupId: string;
   gender: CategoryGender;
-  label: string;
-  maxWeightKg: number | null;
-  isOpenEnded: boolean;
-  displayOrder: number;
-  isActive: boolean;
-};
-
-export type YearGenerationRule = {
-  id: string;
-  label: string;
-  minAge: number | null;
-  maxAge: number | null;
+  name: string;
+  minWeight: number | null;
+  maxWeight: number | null;
   displayOrder: number;
   isActive: boolean;
 };
 
 export type AgeCategoryGroup = {
   id: string;
-  code: string;
   name: string;
-  categoryType: CategoryType;
   minAge: number | null;
   maxAge: number | null;
   displayOrder: number;
   isActive: boolean;
   weights: WeightCategory[];
-  yearRules: YearGenerationRule[];
+};
+
+export type BeltRank = {
+  id: string;
+  name: string;
+  kyuDanValue: number;
+  rankOrder: number;
+  isActive: boolean;
 };

@@ -14,7 +14,7 @@ export function AppShell({ children, sessionContext }: AppShellProps) {
       <DesktopSidebar sessionContext={sessionContext} />
 
       <div className="flex min-h-dvh min-w-0 flex-col md:pl-[6.5rem] lg:pl-80">
-        <AppHeader sessionContext={sessionContext} />
+        <AppHeader sessionContext={sessionContext} title={sessionContext.clubName ?? "Judo Drim"} />
         <main className="min-w-0 flex-1 pb-24 md:pb-lg">{children}</main>
       </div>
 

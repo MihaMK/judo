@@ -35,7 +35,10 @@ export function AthleteListClient({ athletes, groups, canCreate }: AthleteListCl
       const isInactive = athlete.status === "inactive";
       const matchesStatus = statusFilter === "all" || (statusFilter === "active" ? !isInactive : isInactive);
       const matchesGroup = groupFilter === "all" || athlete.groupName === groupFilter;
-      const matchesGender = genderFilter === "all";
+      const matchesGender =
+        genderFilter === "all" ||
+        (genderFilter === "male" && athlete.gender === "M") ||
+        (genderFilter === "female" && athlete.gender === "Ж");
 
       if (!matchesStatus || !matchesGroup || !matchesGender) {
         return false;
@@ -108,7 +111,6 @@ export function AthleteListClient({ athletes, groups, canCreate }: AthleteListCl
               ]}
               value={genderFilter}
               onChange={(value) => setGenderFilter(value as GenderFilter)}
-              helper="Пол не е дел од тековната athlete schema."
             />
 
             <label className="space-y-xs">
@@ -166,7 +168,7 @@ function AthleteCard({ athlete }: { athlete: AthleteListItem }) {
     <Link href={`/athletes/${athlete.id}`} className="group block rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30">
       <article className="rounded-card border border-border bg-surface p-md shadow-soft transition-all duration-ui group-hover:-translate-y-0.5 group-hover:border-primary/25 group-hover:shadow-surface">
         <div className="flex items-center gap-md">
-          <Avatar name={athlete.fullName} size="lg" />
+          <Avatar src={athlete.photoUrl} name={athlete.fullName} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-xs sm:flex-row sm:items-center sm:justify-between">
               <h2 className="truncate text-section-title font-semibold text-foreground">{athlete.fullName}</h2>
@@ -175,7 +177,7 @@ function AthleteCard({ athlete }: { athlete: AthleteListItem }) {
             <div className="mt-xs flex flex-wrap items-center gap-xs text-body text-muted-foreground">
               <span>{athlete.groupName}</span>
               <span aria-hidden="true">·</span>
-              <span>Пол неевидентиран</span>
+              <span>{formatGender(athlete.gender)}</span>
               <span aria-hidden="true">·</span>
               <span>{athlete.primaryGuardianName}</span>
             </div>
@@ -185,6 +187,12 @@ function AthleteCard({ athlete }: { athlete: AthleteListItem }) {
       </article>
     </Link>
   );
+}
+
+function formatGender(gender: AthleteListItem["gender"]) {
+  if (gender === "M") return "Машки";
+  if (gender === "Ж") return "Женски";
+  return "Пол неевидентиран";
 }
 
 function SegmentedFilter({

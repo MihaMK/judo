@@ -35,7 +35,8 @@ export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps)
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState("1000");
+  const [isCustomAmount, setIsCustomAmount] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [state, formAction, isPending] = useActionState(createPayment, initialState);
 
@@ -130,7 +131,11 @@ export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps)
             emptyTitle="Сите членарини се платени"
             emptyDescription="Во тековниот преглед нема спортисти со неплатена членарина."
             athletes={unpaidAthletes}
-            onOpenPayment={setSelectedAthleteId}
+            onOpenPayment={(athleteId) => {
+              setSelectedAthleteId(athleteId);
+              setAmount("1000");
+              setIsCustomAmount(false);
+            }}
             status="unpaid"
             canCreate={canCreate}
           />
@@ -141,7 +146,11 @@ export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps)
             emptyTitle="Нема евидентирани уплати"
             emptyDescription="Кога ќе се зачува уплата, статусот ќе се ажурира автоматски."
             athletes={paidAthletes}
-            onOpenPayment={setSelectedAthleteId}
+            onOpenPayment={(athleteId) => {
+              setSelectedAthleteId(athleteId);
+              setAmount("1000");
+              setIsCustomAmount(false);
+            }}
             status="paid"
             canCreate={canCreate}
           />
@@ -151,16 +160,19 @@ export function PaymentsWorkflow({ athletes, canCreate }: PaymentsWorkflowProps)
           <PaymentEntryPanel
             selectedAthlete={selectedAthlete}
             amount={amount}
+            isCustomAmount={isCustomAmount}
             paymentMethod={paymentMethod}
             canCreate={canCreate}
             state={state}
             isPending={isPending}
             onAmountChange={setAmount}
+            onCustomAmountChange={setIsCustomAmount}
             onPaymentMethodChange={setPaymentMethod}
             formAction={formAction}
             onClose={() => {
               setSelectedAthleteId(null);
-              setAmount("");
+              setAmount("1000");
+              setIsCustomAmount(false);
               setPaymentMethod("cash");
             }}
           />
@@ -235,7 +247,7 @@ function PaymentAthleteCard({
     <article className="rounded-card border border-border bg-surface p-md shadow-soft transition-all duration-ui hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface">
       <div className="flex flex-col gap-md sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-md">
-          <Avatar name={athlete.fullName} size="lg" />
+          <Avatar src={athlete.photoUrl} name={athlete.fullName} size="lg" />
           <div className="min-w-0">
             <h3 className="truncate text-body font-semibold text-foreground">{athlete.fullName}</h3>
             <div className="mt-xs flex flex-wrap items-center gap-xs text-caption text-muted-foreground">
@@ -264,23 +276,27 @@ function PaymentAthleteCard({
 function PaymentEntryPanel({
   selectedAthlete,
   amount,
+  isCustomAmount,
   paymentMethod,
   canCreate,
   state,
   isPending,
   formAction,
   onAmountChange,
+  onCustomAmountChange,
   onPaymentMethodChange,
   onClose
 }: {
   selectedAthlete: PaymentAthlete | null;
   amount: string;
+  isCustomAmount: boolean;
   paymentMethod: PaymentMethod;
   canCreate: boolean;
   state: PaymentActionState;
   isPending: boolean;
   formAction: (formData: FormData) => void;
   onAmountChange: (value: string) => void;
+  onCustomAmountChange: (value: boolean) => void;
   onPaymentMethodChange: (value: PaymentMethod) => void;
   onClose: () => void;
 }) {
@@ -318,28 +334,82 @@ function PaymentEntryPanel({
           <form className="space-y-md" action={formAction}>
             <input type="hidden" name="athleteId" value={selectedAthlete.id} />
             <input type="hidden" name="paymentDate" value={getTodayDate()} />
+            <input type="hidden" name="amount" value={amount} />
 
             <div className="flex items-center gap-md rounded-card border border-border bg-muted/45 p-sm">
-              <Avatar name={selectedAthlete.fullName} />
+              <Avatar src={selectedAthlete.photoUrl} name={selectedAthlete.fullName} />
               <div className="min-w-0">
                 <p className="truncate text-body font-semibold text-foreground">{selectedAthlete.fullName}</p>
                 <p className="text-caption text-muted-foreground">{selectedAthlete.groupName}</p>
               </div>
             </div>
 
-            <label className="block space-y-xs">
-              <span className="text-sm font-semibold text-foreground">Износ</span>
-              <Input
-                name="amount"
-                type="number"
-                min={0}
-                step={100}
-                value={amount}
-                onChange={(event) => onAmountChange(event.target.value)}
-                placeholder="Пр. 3000"
+            <div className="space-y-sm">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Износ</p>
+                <p className="mt-xs text-caption text-muted-foreground">Изберете брза уплата или внесете друг износ во денари.</p>
+              </div>
+              <div className="grid gap-sm sm:grid-cols-3">
+                {[1, 2, 3].map((months) => {
+                  const quickAmount = String(monthlyFee * months);
+                  const active = !isCustomAmount && amount === quickAmount;
+
+                  return (
+                    <button
+                      key={months}
+                      type="button"
+                      disabled={!canCreate}
+                      onClick={() => {
+                        onCustomAmountChange(false);
+                        onAmountChange(quickAmount);
+                      }}
+                      className={cn(
+                        "min-h-20 rounded-card border px-sm py-sm text-left shadow-soft transition-all duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50",
+                        active
+                          ? "border-gold/50 bg-gold/15 text-foreground"
+                          : "border-border bg-surface text-foreground hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface"
+                      )}
+                    >
+                      <span className="block text-sm font-semibold">{months} {months === 1 ? "месец" : "месеци"}</span>
+                      <span className="mt-xs block text-card-title font-semibold">{formatCurrency(monthlyFee * months)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
                 disabled={!canCreate}
-              />
-            </label>
+                onClick={() => {
+                  onCustomAmountChange(!isCustomAmount);
+                  if (!isCustomAmount && !amount) {
+                    onAmountChange(String(monthlyFee));
+                  }
+                }}
+                className="text-sm font-semibold text-primary transition-colors duration-ui hover:text-primary/80 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {isCustomAmount ? "Врати на брз избор" : "Внеси друг износ"}
+              </button>
+
+              {isCustomAmount ? (
+                <label className="block space-y-xs">
+                  <span className="text-sm font-semibold text-foreground">Друг износ</span>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    name="membership-amount-manual"
+                    value={amount}
+                    onChange={(event) => onAmountChange(event.target.value.replace(/[^\d]/g, ""))}
+                    placeholder="Пр. 3000"
+                    disabled={!canCreate}
+                  />
+                </label>
+              ) : null}
+            </div>
 
             <label className="block space-y-xs">
               <span className="text-sm font-semibold text-foreground">Начин на плаќање</span>

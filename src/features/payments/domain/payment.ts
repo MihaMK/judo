@@ -26,6 +26,7 @@ export type MembershipSummary = {
 export type PaymentAthlete = {
   id: string;
   fullName: string;
+  photoUrl?: string | null;
   groupName: string;
   guardianNames: string[];
   guardianPhones: string[];

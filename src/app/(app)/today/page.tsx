@@ -21,6 +21,7 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { PageContainer } from "@/shared/ui/page-container";
 import { StatCard } from "@/shared/ui/stat-card";
 import { cn } from "@/shared/lib/cn";
+import { formatDateMk } from "@/shared/lib/date-format";
 
 type KpiItem = {
   label: string;
@@ -174,15 +175,6 @@ function getFirstName(displayName: string) {
   return displayName.trim().split(/\s+/)[0] || "тренеру";
 }
 
-function formatMacedonianDate(date: Date) {
-  return new Intl.DateTimeFormat("mk-MK", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  }).format(date);
-}
-
 export default async function TodayPage() {
   const sessionContext = await getSessionContext();
   const membershipSummary = await getMembershipDashboardSummary(sessionContext);
@@ -217,7 +209,7 @@ export default async function TodayPage() {
           </div>
           <div className="rounded-card border border-white/10 bg-white/[0.06] p-md shadow-soft backdrop-blur">
             <p className="text-caption font-semibold uppercase tracking-[0.16em] text-slate-400">Денес</p>
-            <p className="mt-xs text-card-title font-semibold capitalize text-white">{formatMacedonianDate(now)}</p>
+            <p className="mt-xs text-card-title font-semibold text-white">{formatDateMk(now)}</p>
           </div>
         </div>
       </section>

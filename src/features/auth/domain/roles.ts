@@ -7,6 +7,8 @@ export type SessionContext = {
   userProfileId: string | null;
   role: AppRole;
   clubId: string | null;
+  clubName: string | null;
+  clubLogoUrl: string | null;
   parentGuardianIds: string[];
   displayName: string;
   isAuthenticated: boolean;

@@ -3,6 +3,7 @@ export const GUARDIAN_RELATIONSHIPS = ["mother", "father", "guardian", "other"] 
 
 export type AthleteStatus = (typeof ATHLETE_STATUSES)[number];
 export type GuardianRelationship = (typeof GUARDIAN_RELATIONSHIPS)[number];
+export type AthleteGender = "M" | "Ж";
 
 export type TrainingGroup = {
   id: string;
@@ -25,9 +26,13 @@ export type AthleteProfile = {
   fullName: string;
   birthDate: string;
   birthYear: number;
+  gender?: AthleteGender | null;
   status: AthleteStatus;
   groupId: string;
+  beltRankId?: string | null;
   currentBelt: string;
+  weight?: number | null;
+  photoUrl?: string | null;
   joinedAt: string;
   profileSummary: string;
   guardians: GuardianSummary[];
@@ -38,9 +43,11 @@ export type AthleteListItem = {
   fullName: string;
   birthDate: string;
   birthYear: number;
+  gender?: AthleteGender | null;
   status: AthleteStatus;
   groupName: string;
   currentBelt: string;
+  photoUrl?: string | null;
   primaryGuardianName: string;
   primaryGuardianPhone?: string;
   guardianCount: number;

@@ -15,10 +15,10 @@ export function DesktopSidebar({ sessionContext }: DesktopSidebarProps) {
 
       <div className="relative border-b border-white/10 p-sm lg:p-md">
         <div className="lg:hidden">
-          <ClubBrand compact />
+          <ClubBrand clubName={sessionContext.clubName ?? undefined} logoUrl={sessionContext.clubLogoUrl} compact />
         </div>
         <div className="hidden lg:block">
-          <ClubBrand />
+          <ClubBrand clubName={sessionContext.clubName ?? undefined} logoUrl={sessionContext.clubLogoUrl} />
         </div>
       </div>
 

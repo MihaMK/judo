@@ -17,7 +17,7 @@ export async function createPayment(
 ): Promise<PaymentActionState> {
   const sessionContext = await getSessionContext();
 
-  if (!sessionContext.isAuthenticated || !sessionContext.userProfileId || !sessionContext.clubId) {
+  if (!sessionContext.isAuthenticated || !sessionContext.userId || !sessionContext.userProfileId || !sessionContext.clubId) {
     return { message: "Потребна е најава.", ok: false };
   }
 
@@ -63,7 +63,7 @@ export async function createPayment(
       amount,
       paymentMethod,
       paymentDate,
-      createdBy: sessionContext.userProfileId
+      createdBy: sessionContext.userId
     });
   } catch (error) {
     if (isMembershipSchemaMissingError(error)) {
@@ -71,7 +71,7 @@ export async function createPayment(
     }
 
     return {
-      message: error instanceof Error ? `Уплатата не е зачувана: ${error.message}` : "Уплатата не е зачувана.",
+      message: `Уплатата не е зачувана: ${formatUnknownError(error)}`,
       ok: false
     };
   }
@@ -97,4 +97,22 @@ function isValidDate(value: string) {
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function formatUnknownError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const possibleError = error as { message?: unknown; details?: unknown; code?: unknown };
+    const parts = [possibleError.message, possibleError.details, possibleError.code]
+      .filter((value): value is string => typeof value === "string" && value.length > 0);
+
+    if (parts.length > 0) {
+      return parts.join(" ");
+    }
+  }
+
+  return "Проверете ја Supabase payments конфигурацијата.";
 }

@@ -11,7 +11,7 @@ type PaymentRow = {
   id: string;
   athlete_id: string;
   amount: number | string;
-  payment_method: PaymentMethod;
+  payment_method: string;
   payment_date: string | null;
   created_at: string;
 };
@@ -56,7 +56,7 @@ export async function loadPaymentsByAthleteId(clubId: string, athleteIds: string
       id: payment.id,
       athleteId: payment.athlete_id,
       amount,
-      paymentMethod: payment.payment_method,
+      paymentMethod: mapPaymentMethodFromDatabase(payment.payment_method),
       paymentDate: payment.payment_date ?? payment.created_at.slice(0, 10),
       monthsCovered: calculateMonthsCovered(amount, DEFAULT_MONTHLY_MEMBERSHIP_FEE),
       createdAt: payment.created_at
@@ -69,18 +69,58 @@ export async function loadPaymentsByAthleteId(clubId: string, athleteIds: string
 
 export async function createPaymentRecord(input: CreatePaymentInput) {
   const admin = createAdminSupabaseClient();
-  const { error } = await admin.from("payments").insert({
+  const payload = {
     club_id: input.clubId,
     athlete_id: input.athleteId,
     amount: input.amount,
-    payment_method: input.paymentMethod,
+    payment_method: mapPaymentMethodToDatabase(input.paymentMethod),
     payment_date: input.paymentDate,
     created_by: input.createdBy
-  });
+  };
+  const { error } = await admin.from("payments").insert(payload);
+
+  if (isPaymentMethodConstraintError(error)) {
+    const { error: fallbackError } = await admin.from("payments").insert({
+      ...payload,
+      payment_method: input.paymentMethod
+    });
+
+    if (fallbackError) {
+      throw fallbackError;
+    }
+
+    return;
+  }
 
   if (error) {
     throw error;
   }
+}
+
+function mapPaymentMethodToDatabase(method: PaymentMethod) {
+  return method === "bank_transfer" ? "Трансакциска сметка" : "Готовина";
+}
+
+function mapPaymentMethodFromDatabase(method: string): PaymentMethod {
+  if (method === "bank_transfer" || method === "Трансакциска сметка") {
+    return "bank_transfer";
+  }
+
+  return "cash";
+}
+
+function isPaymentMethodConstraintError(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const possibleError = error as { code?: string; message?: string; details?: string };
+  return (
+    possibleError.code === "23514" &&
+    [possibleError.message, possibleError.details].some((value) =>
+      typeof value === "string" && value.toLowerCase().includes("payment_method")
+    )
+  );
 }
 
 export function isPaymentsSchemaMissingError(error: unknown) {

@@ -28,6 +28,7 @@ export default async function AthleteProfilePage({ params }: AthleteProfilePageP
         athlete={athlete}
         dossier={dossier}
         canManage={sessionContext.role === "management"}
+        canRecordWeight={sessionContext.role === "management" || sessionContext.role === "trainer"}
       />
     </PageContainer>
   );
