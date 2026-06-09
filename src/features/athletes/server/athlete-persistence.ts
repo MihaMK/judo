@@ -164,8 +164,6 @@ async function loadBeltRankMap(supabase: Awaited<ReturnType<typeof createServerS
   const { data, error } = await supabase
     .from("belt_ranks")
     .select("id, name")
-    .eq("is_active", true)
-    .is("deleted_at", null)
     .order("rank_order", { ascending: true });
 
   if (error) {

@@ -527,8 +527,6 @@ async function resolveBeltRankName(beltRankId: string) {
     .from("belt_ranks")
     .select("name")
     .eq("id", beltRankId)
-    .eq("is_active", true)
-    .is("deleted_at", null)
     .maybeSingle();
 
   if (error) {

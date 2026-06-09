@@ -1,4 +1,5 @@
 import { createAdminSupabaseClient } from "@/services/supabase/admin";
+import { createServerSupabaseClient } from "@/services/supabase/server";
 import { isServiceRoleConfigured, isSupabaseConfigured } from "@/shared/config/env";
 import type { AgeCategoryGroup, BeltRank, CategoryGender, WeightCategory } from "../domain/category";
 
@@ -27,7 +28,7 @@ type BeltRankRow = {
   name: string;
   kyu_dan_value: number;
   rank_order: number;
-  is_active: boolean;
+  is_active?: boolean;
 };
 
 export async function getCategoryManagementView(clubId: string | null): Promise<AgeCategoryGroup[]> {
@@ -82,15 +83,14 @@ export async function getCategoryManagementView(clubId: string | null): Promise<
 }
 
 export async function getBeltRanksView(): Promise<BeltRank[]> {
-  if (!isSupabaseConfigured() || !isServiceRoleConfigured()) {
+  if (!isSupabaseConfigured()) {
     return [];
   }
 
-  const admin = createAdminSupabaseClient();
-  const { data, error } = await admin
+  const client = isServiceRoleConfigured() ? createAdminSupabaseClient() : await createServerSupabaseClient();
+  const { data, error } = await client
     .from("belt_ranks")
-    .select("id, name, kyu_dan_value, rank_order, is_active")
-    .is("deleted_at", null)
+    .select("id, name, kyu_dan_value, rank_order")
     .order("rank_order", { ascending: true });
 
   if (error) {
@@ -106,10 +106,9 @@ export async function getBeltRanksView(): Promise<BeltRank[]> {
     name: rank.name,
     kyuDanValue: rank.kyu_dan_value,
     rankOrder: rank.rank_order,
-    isActive: rank.is_active
+    isActive: rank.is_active ?? true
   }));
 }
-
 function toAgeGroup(row: AgeGroupRow, weights: WeightCategory[]): AgeCategoryGroup {
   return {
     id: row.id,
