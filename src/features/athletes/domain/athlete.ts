@@ -1,4 +1,4 @@
-export const ATHLETE_STATUSES = ["active", "paused", "inactive"] as const;
+﻿export const ATHLETE_STATUSES = ["active", "paused", "inactive"] as const;
 export const GUARDIAN_RELATIONSHIPS = ["mother", "father", "guardian", "other"] as const;
 
 export type AthleteStatus = (typeof ATHLETE_STATUSES)[number];
@@ -32,8 +32,12 @@ export type AthleteProfile = {
   beltRankId?: string | null;
   currentBelt: string;
   weight?: number | null;
+  federationLicenseNumber?: string | null;
+  phone?: string | null;
+  email?: string | null;
   photoUrl?: string | null;
   joinedAt: string;
+  membershipStartMonth?: string | null;
   profileSummary: string;
   guardians: GuardianSummary[];
 };
@@ -80,3 +84,5 @@ export type GuardianOption = {
   phone: string;
   email?: string;
 };
+
+

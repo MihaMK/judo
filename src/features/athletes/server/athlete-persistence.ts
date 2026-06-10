@@ -1,4 +1,4 @@
-import { createAdminSupabaseClient } from "@/services/supabase/admin";
+﻿import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { createServerSupabaseClient } from "@/services/supabase/server";
 import { isSupabaseConfigured } from "@/shared/config/env";
 import type {
@@ -21,6 +21,9 @@ type AthleteRow = {
   belt_rank_id: string | null;
   current_belt_text: string;
   weight: number | string | null;
+  federation_license_number: string | null;
+  phone: string | null;
+  email: string | null;
   photo_path: string | null;
   joined_at: string;
   profile_summary: string;
@@ -67,6 +70,9 @@ export type AthleteMutationInput = {
   beltRankId: string | null;
   currentBeltText: string;
   weight: number | null;
+  federationLicenseNumber: string | null;
+  phone: string | null;
+  email: string | null;
   profileSummary: string;
 };
 
@@ -113,7 +119,7 @@ export async function loadPersistedAthletes(
 
   let athleteQuery = supabase
     .from("athletes")
-    .select("id, full_name, birth_date, gender, status, current_group_id, belt_rank_id, current_belt_text, weight, photo_path, joined_at, profile_summary")
+    .select("id, full_name, birth_date, gender, status, current_group_id, belt_rank_id, current_belt_text, weight, federation_license_number, phone, email, photo_path, joined_at, profile_summary")
     .eq("club_id", clubId)
     .is("deleted_at", null)
     .order("full_name", { ascending: true });
@@ -136,6 +142,7 @@ export async function loadPersistedAthletes(
   const athleteIds = athleteRows.map((athlete) => athlete.id);
   const beltRankMap = await loadBeltRankMap(supabase);
   const guardianMap = await loadGuardianMap(clubId, athleteIds, restrictToParentGuardians ? parentGuardianIds : []);
+  const membershipStartMonthMap = await loadMembershipStartMonthMap(clubId, athleteIds);
   const photoUrlMap = await loadAthletePhotoUrlMap(athleteRows.map((athlete) => athlete.photo_path).filter(isPresent));
 
   return athleteRows.map((athlete) => {
@@ -152,12 +159,42 @@ export async function loadPersistedAthletes(
       beltRankId: athlete.belt_rank_id,
       currentBelt: (athlete.belt_rank_id ? beltRankMap.get(athlete.belt_rank_id) : null) ?? localizeKnownAthleteText(athlete.current_belt_text),
       weight: athlete.weight === null ? null : Number(athlete.weight),
+      federationLicenseNumber: athlete.federation_license_number,
+      phone: athlete.phone,
+      email: athlete.email,
       photoUrl: athlete.photo_path ? photoUrlMap.get(athlete.photo_path) ?? null : null,
       joinedAt: athlete.joined_at,
+      membershipStartMonth: membershipStartMonthMap.get(athlete.id) ?? null,
       profileSummary: localizeKnownAthleteText(athlete.profile_summary),
       guardians: guardianMap.get(athlete.id) ?? []
     };
   });
+}
+
+async function loadMembershipStartMonthMap(clubId: string, athleteIds: string[]) {
+  const membershipByAthleteId = new Map<string, string>();
+
+  if (athleteIds.length === 0) {
+    return membershipByAthleteId;
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("athlete_memberships")
+    .select("athlete_id, start_month")
+    .eq("club_id", clubId)
+    .is("deleted_at", null)
+    .in("athlete_id", athleteIds);
+
+  if (error) {
+    return membershipByAthleteId;
+  }
+
+  for (const row of data as Array<{ athlete_id: string; start_month: string }>) {
+    membershipByAthleteId.set(row.athlete_id, row.start_month);
+  }
+
+  return membershipByAthleteId;
 }
 
 async function loadBeltRankMap(supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>) {
@@ -235,6 +272,9 @@ export async function createPersistedAthlete(input: AthleteMutationInput): Promi
       belt_rank_id: input.beltRankId,
       current_belt_text: input.currentBeltText,
       weight: input.weight,
+      federation_license_number: input.federationLicenseNumber,
+      phone: input.phone,
+      email: input.email,
       profile_summary: input.profileSummary
     })
     .select("id")
@@ -310,6 +350,9 @@ export async function updatePersistedAthlete(athleteId: string, input: AthleteMu
       belt_rank_id: input.beltRankId,
       current_belt_text: input.currentBeltText,
       weight: input.weight,
+      federation_license_number: input.federationLicenseNumber,
+      phone: input.phone,
+      email: input.email,
       profile_summary: input.profileSummary,
       updated_at: new Date().toISOString()
     })
@@ -530,3 +573,5 @@ function localizeKnownAthleteText(value: string) {
 function isPresent<T>(value: T | null | undefined): value is T {
   return value !== null && value !== undefined;
 }
+
+

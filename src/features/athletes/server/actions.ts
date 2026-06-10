@@ -1,8 +1,9 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getSessionContext } from "@/features/auth/server/session";
+import { createAthleteMembership } from "@/features/payments/server/payment-persistence";
 import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { mk } from "@/shared/i18n/mk";
 import { ATHLETE_STATUSES, GUARDIAN_RELATIONSHIPS, type AthleteStatus, type GuardianRelationship } from "../domain/athlete";
@@ -48,6 +49,7 @@ type ParsedAthleteForm = {
     phone: string;
     email: string | null;
   };
+  membershipStartMonth: string;
 };
 
 export async function createAthleteAction(_previousState: AthleteFormState, formData: FormData): Promise<AthleteFormState> {
@@ -57,7 +59,7 @@ export async function createAthleteAction(_previousState: AthleteFormState, form
     return { message: access.message };
   }
 
-  const parsed = await parseAthleteForm(formData, access.clubId, { requireGuardian: true });
+  const parsed = await parseAthleteForm(formData, access.clubId, { requireGuardian: false });
 
   if (!parsed.ok) {
     return { message: parsed.message, fieldErrors: parsed.fieldErrors };
@@ -67,6 +69,13 @@ export async function createAthleteAction(_previousState: AthleteFormState, form
 
   try {
     athleteId = await createPersistedAthlete(parsed.value.input);
+
+    await createAthleteMembership({
+      clubId: access.clubId,
+      athleteId,
+      startMonth: parsed.value.membershipStartMonth,
+      createdByUserProfileId: access.userProfileId
+    });
 
     if (parsed.value.guardian) {
       const guardianId = await createPersistedGuardian({
@@ -302,7 +311,7 @@ export async function addWeightMeasurementAction(
   };
 }
 
-async function assertManagementAccess(): Promise<{ ok: true; clubId: string } | { ok: false; message: string }> {
+async function assertManagementAccess(): Promise<{ ok: true; clubId: string; userProfileId: string } | { ok: false; message: string }> {
   const sessionContext = await getSessionContext();
 
   if (!sessionContext.isAuthenticated || !sessionContext.userProfileId || !sessionContext.clubId) {
@@ -313,7 +322,7 @@ async function assertManagementAccess(): Promise<{ ok: true; clubId: string } | 
     return { ok: false, message: mk.athletes.managementOnly };
   }
 
-  return { ok: true, clubId: sessionContext.clubId };
+  return { ok: true, clubId: sessionContext.clubId, userProfileId: sessionContext.userProfileId };
 }
 
 async function assertOperationalAccess(): Promise<
@@ -349,12 +358,17 @@ async function parseAthleteForm(
   const currentBelt = String(formData.get("currentBelt") ?? "").trim();
   const beltRankId = String(formData.get("beltRankId") ?? "").trim();
   const weight = numberOrNull(formData, "weight");
+  const federationLicenseNumber = String(formData.get("federationLicenseNumber") ?? "").trim();
+  const athletePhone = String(formData.get("athletePhone") ?? "").trim();
+  const athleteEmail = String(formData.get("athleteEmail") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
+  const membershipStartMonth = parseMembershipStartMonth(String(formData.get("membershipStartMonth") ?? "").trim());
   const guardianFullName = String(formData.get("guardianFullName") ?? "").trim();
   const guardianPhone = String(formData.get("guardianPhone") ?? "").trim();
   const guardianEmail = String(formData.get("guardianEmail") ?? "").trim();
   const photoFile = getPhotoFile(formData);
   const fieldErrors: Record<string, string> = {};
+  const hasGuardianInput = Boolean(guardianFullName || guardianPhone || guardianEmail);
 
   if (!firstName) {
     fieldErrors.firstName = mk.athletes.formRequired;
@@ -372,15 +386,23 @@ async function parseAthleteForm(
     fieldErrors.gender = mk.athletes.formRequired;
   }
 
+  if (federationLicenseNumber && !/^\d+$/.test(federationLicenseNumber)) {
+    fieldErrors.federationLicenseNumber = "Бројот на легитимација мора да содржи само цифри.";
+  }
+
+  if (athleteEmail && !isValidEmail(athleteEmail)) {
+    fieldErrors.athleteEmail = "Внесете валидна email адреса.";
+  }
+
   if (!isAthleteStatus(status)) {
     fieldErrors.status = mk.athletes.formRequired;
   }
 
-  if (options.requireGuardian && !guardianFullName) {
+  if ((options.requireGuardian || hasGuardianInput) && !guardianFullName) {
     fieldErrors.guardianFullName = mk.athletes.formRequired;
   }
 
-  if (options.requireGuardian && !guardianPhone) {
+  if ((options.requireGuardian || hasGuardianInput) && !guardianPhone) {
     fieldErrors.guardianPhone = mk.athletes.formRequired;
   }
 
@@ -426,15 +448,19 @@ async function parseAthleteForm(
       beltRankId: beltRankId || null,
       currentBeltText: (resolvedBeltName ?? currentBelt) || "Бел",
       weight,
+      federationLicenseNumber: federationLicenseNumber || null,
+      phone: athletePhone || null,
+      email: athleteEmail || null,
       profileSummary: notes
-    }
+    },
+    membershipStartMonth
   };
 
   if (photoFile) {
     value.photoFile = photoFile;
   }
 
-  if (options.requireGuardian) {
+  if (options.requireGuardian || hasGuardianInput) {
     value.guardian = {
       fullName: guardianFullName,
       phone: guardianPhone,
@@ -463,6 +489,16 @@ async function uploadAthletePhoto(input: { clubId: string; athleteId: string; fi
     athleteId: input.athleteId,
     photoPath
   });
+}
+
+function parseMembershipStartMonth(value: string) {
+  const normalized = value && /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : "";
+  if (normalized && isValidDate(normalized)) {
+    return normalized;
+  }
+
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
 function getPhotoFile(formData: FormData) {
@@ -539,3 +575,5 @@ async function resolveBeltRankName(beltRankId: string) {
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
 }
+
+

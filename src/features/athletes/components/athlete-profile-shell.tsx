@@ -4,6 +4,9 @@ import {
   CalendarCheck,
   CreditCard,
   Edit3,
+  IdCard,
+  Mail,
+  Phone,
   Scale,
   ShieldAlert,
   Trophy,
@@ -55,6 +58,7 @@ export function AthleteProfileShell({ athlete, dossier, canManage, canRecordWeig
             guardian={guardian}
             canManage={canManage}
           />
+          <AthleteDirectContactCard athlete={athlete} />
           <SportsCard athlete={athlete} ageGroupName={dossier.ageGroupName} weightCategoryName={dossier.weightCategoryName} />
           <AttendanceCard attendance={dossier.attendance} />
           <WeightHistoryCard athlete={athlete} weightHistory={dossier.weightHistory} canRecord={canRecordWeight} />
@@ -115,6 +119,21 @@ function HeroCard({
           ) : null}
         </div>
       </div>
+    </Card>
+  );
+}
+
+function AthleteDirectContactCard({ athlete }: { athlete: AthleteProfileView }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Директен контакт на спортист</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-sm sm:grid-cols-2">
+        <InfoTile icon={IdCard} label="Број на легитимација" value={athlete.federationLicenseNumber ?? "Нема податок"} className="sm:col-span-2" />
+        <InfoTile icon={Phone} label="Директен телефон" value={athlete.phone ?? "Нема податок"} />
+        <InfoTile icon={Mail} label="Директен Email" value={athlete.email ?? "Нема податок"} />
+      </CardContent>
     </Card>
   );
 }
@@ -199,7 +218,7 @@ function AttendanceCard({ attendance }: { attendance: AthleteProfileDossier["att
           <EmptyState
             icon={CalendarCheck}
             title="Присуството не е достапно"
-            description="Attendance schema не е достапна или сè уште не е применета во Supabase."
+            description="Табелите за присуство не се достапни или сè уште не се применети во Supabase."
           />
         ) : (
           <>

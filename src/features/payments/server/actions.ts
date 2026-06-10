@@ -1,10 +1,10 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/features/auth/server/session";
-import { calculateMonthsCovered, PAYMENT_METHODS, type PaymentMethod } from "../domain/payment";
+import { calculatePaymentAllocationPreview, PAYMENT_METHODS, type PaymentMethod } from "../domain/payment";
 import { getAthleteMembershipSummary, isMembershipSchemaMissingError } from "./payment-read-models";
-import { createPaymentRecord } from "./payment-persistence";
+import { createPaymentAllocations, createPaymentRecord } from "./payment-persistence";
 
 export type PaymentActionState = {
   ok?: boolean;
@@ -50,20 +50,34 @@ export async function createPayment(
     clubId: sessionContext.clubId,
     athleteId
   });
-  const monthsCovered = calculateMonthsCovered(amount, membership.monthlyFee);
+  const preview = calculatePaymentAllocationPreview({
+    amount,
+    monthlyFee: membership.monthlyFee,
+    startMonth: membership.startMonth,
+    paidMembershipMonths: membership.paidMembershipMonths,
+    exemptMembershipMonths: membership.exemptMembershipMonths
+  });
 
-  if (monthsCovered <= 0) {
+  if (preview.monthsCovered <= 0 || preview.coveredMonths.length === 0) {
     return { message: "Износот мора да покрие најмалку еден цел месец.", ok: false };
   }
 
   try {
-    await createPaymentRecord({
+    const paymentId = await createPaymentRecord({
       clubId: sessionContext.clubId,
       athleteId,
       amount,
       paymentMethod,
       paymentDate,
       createdBy: sessionContext.userId
+    });
+
+    await createPaymentAllocations({
+      clubId: sessionContext.clubId,
+      athleteId,
+      paymentId,
+      months: preview.coveredMonths.map((month) => month.month),
+      monthlyFee: membership.monthlyFee
     });
   } catch (error) {
     if (isMembershipSchemaMissingError(error)) {
@@ -116,3 +130,4 @@ function formatUnknownError(error: unknown) {
 
   return "Проверете ја Supabase payments конфигурацијата.";
 }
+

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { Camera, Image as ImageIcon } from "lucide-react";
@@ -48,6 +48,7 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
   const isEdit = Boolean(athlete);
   const beltRankOptions = [...beltRanks].sort((first, second) => first.rankOrder - second.rankOrder);
   const canResolveCategory = Boolean(parseDate(birthDate));
+  const defaultMembershipStartMonth = toMonthInputValue(athlete?.membershipStartMonth) ?? getCurrentMonthInputValue();
   const visibleCategoryPreview = canResolveCategory
     ? categoryPreview
     : {
@@ -241,6 +242,24 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
             />
           </FormField>
 
+          <FormField
+            label="Број на легитимација"
+            htmlFor="federationLicenseNumber"
+            error={state.fieldErrors?.federationLicenseNumber}
+            hint="Број издаден од федерацијата. Дозволени се само цифри."
+          >
+            <Input
+              id="federationLicenseNumber"
+              name="federationLicenseNumber"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              defaultValue={athlete?.federationLicenseNumber ?? ""}
+              placeholder="Пр. 1234"
+              aria-invalid={Boolean(state.fieldErrors?.federationLicenseNumber)}
+            />
+          </FormField>
+
           {beltRankOptions.length > 0 ? (
             <FormField label="Појас" htmlFor="beltRankId">
               <Select id="beltRankId" name="beltRankId" defaultValue={athlete?.beltRankId ?? ""}>
@@ -282,8 +301,45 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
             </Select>
           </FormField>
 
+          <FormField
+            label="Почеток на членарина"
+            htmlFor="membershipStartMonth"
+            hint="За постоечки членови внесете 01.2026; за нови членови оставете го месецот на зачленување."
+          >
+            <Input id="membershipStartMonth" name="membershipStartMonth" type="month" defaultValue={defaultMembershipStartMonth} />
+          </FormField>
+
           <FormField label="Белешки" htmlFor="notes" className="md:col-span-2" hint={mk.common.optional}>
             <Textarea id="notes" name="notes" defaultValue={athlete?.profileSummary ?? ""} />
+          </FormField>
+        </CardContent>
+      </Card>
+
+      <Card variant="elevated" className="overflow-hidden">
+        <CardHeader className="border-b border-border bg-subdued/60">
+          <CardTitle>Директен контакт на спортист</CardTitle>
+          <CardDescription>Опционални контакт податоци за директна комуникација со спортистот.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-md p-md md:grid-cols-2">
+          <FormField label="Телефон на спортист" htmlFor="athletePhone" hint={mk.common.optional}>
+            <Input
+              id="athletePhone"
+              name="athletePhone"
+              type="tel"
+              defaultValue={athlete?.phone ?? ""}
+              placeholder="Пр. 07X XXX XXX"
+            />
+          </FormField>
+
+          <FormField label="Email на спортист" htmlFor="athleteEmail" error={state.fieldErrors?.athleteEmail} hint={mk.common.optional}>
+            <Input
+              id="athleteEmail"
+              name="athleteEmail"
+              type="email"
+              defaultValue={athlete?.email ?? ""}
+              placeholder="Пр. ime@email.com"
+              aria-invalid={Boolean(state.fieldErrors?.athleteEmail)}
+            />
           </FormField>
         </CardContent>
       </Card>
@@ -292,14 +348,14 @@ export function AthleteForm({ action, groups, ageGroups, beltRanks, athlete }: A
         <Card variant="elevated" className="overflow-hidden">
           <CardHeader className="border-b border-border bg-subdued/60">
             <CardTitle>Родител / Старател</CardTitle>
-            <CardDescription>Во V1 се внесува точно еден примарен контакт.</CardDescription>
+            <CardDescription>Опционален примарен контакт. Ако се внесе родител, внесете име и телефон.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-md p-md md:grid-cols-2">
-            <FormField label="Име и презиме" htmlFor="guardianFullName" error={state.fieldErrors?.guardianFullName}>
+            <FormField label="Име и презиме" htmlFor="guardianFullName" error={state.fieldErrors?.guardianFullName} hint={mk.common.optional}>
               <Input id="guardianFullName" name="guardianFullName" aria-invalid={Boolean(state.fieldErrors?.guardianFullName)} />
             </FormField>
 
-            <FormField label="Телефон" htmlFor="guardianPhone" error={state.fieldErrors?.guardianPhone}>
+            <FormField label="Телефон" htmlFor="guardianPhone" error={state.fieldErrors?.guardianPhone} hint={mk.common.optional}>
               <Input id="guardianPhone" name="guardianPhone" aria-invalid={Boolean(state.fieldErrors?.guardianPhone)} />
             </FormField>
 
@@ -378,6 +434,19 @@ function parseDisplayDate(value: string) {
   return parseDate(isoDate) ? isoDate : null;
 }
 
+function toMonthInputValue(value?: string | null) {
+  if (!value || !/^\d{4}-\d{2}/.test(value)) {
+    return null;
+  }
+
+  return value.slice(0, 7);
+}
+
+function getCurrentMonthInputValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function normalizeBelt(value?: string) {
   if (!value) {
     return "Бел";
@@ -385,3 +454,4 @@ function normalizeBelt(value?: string) {
 
   return fallbackBeltOptions.includes(value) ? value : "Бел";
 }
+

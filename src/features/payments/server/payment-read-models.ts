@@ -1,4 +1,4 @@
-import type { SessionContext } from "@/features/auth/domain/roles";
+﻿import type { SessionContext } from "@/features/auth/domain/roles";
 import { createAdminSupabaseClient } from "@/services/supabase/admin";
 import { createServerSupabaseClient } from "@/services/supabase/server";
 import { isSupabaseConfigured } from "@/shared/config/env";
@@ -8,7 +8,13 @@ import {
   type MembershipSummary,
   type PaymentAthlete
 } from "../domain/payment";
-import { isPaymentsSchemaMissingError, loadPaymentsByAthleteId } from "./payment-persistence";
+import {
+  isPaymentsSchemaMissingError,
+  loadMembershipAllocationsByAthleteId,
+  loadMembershipExemptionsByAthleteId,
+  loadMembershipsByAthleteId,
+  loadPaymentsByAthleteId
+} from "./payment-persistence";
 
 type AthleteRow = {
   id: string;
@@ -65,7 +71,15 @@ export async function getPaymentAthletesView(sessionContext: SessionContext): Pr
 
   const athleteRows = athletes as AthleteRow[];
   const athleteIds = athleteRows.map((athlete) => athlete.id);
-  const [groupsById, guardiansByAthleteId, paymentsByAthleteId, photoUrlByPath] = await Promise.all([
+  const [
+    groupsById,
+    guardiansByAthleteId,
+    paymentsByAthleteId,
+    membershipsByAthleteId,
+    allocationsByAthleteId,
+    exemptionsByAthleteId,
+    photoUrlByPath
+  ] = await Promise.all([
     loadGroupsById(sessionContext.clubId),
     loadGuardiansByAthleteId(
       sessionContext.clubId,
@@ -73,6 +87,9 @@ export async function getPaymentAthletesView(sessionContext: SessionContext): Pr
       sessionContext.role === "parent" ? sessionContext.parentGuardianIds : []
     ),
     loadPaymentsByAthleteId(sessionContext.clubId, athleteIds),
+    loadMembershipsByAthleteId(sessionContext.clubId, athleteIds),
+    loadMembershipAllocationsByAthleteId(sessionContext.clubId, athleteIds),
+    loadMembershipExemptionsByAthleteId(sessionContext.clubId, athleteIds),
     loadAthletePhotoUrlMap(athleteRows.map((athlete) => athlete.photo_path).filter(isPresent))
   ]);
 
@@ -90,7 +107,10 @@ export async function getPaymentAthletesView(sessionContext: SessionContext): Pr
       guardianPhones: guardians.map((guardian) => guardian.phone),
       membership: calculateMembershipSummary({
         monthlyFee: DEFAULT_MONTHLY_MEMBERSHIP_FEE,
-        payments: paymentsByAthleteId.get(athlete.id) ?? []
+        membership: membershipsByAthleteId.get(athlete.id) ?? null,
+        payments: paymentsByAthleteId.get(athlete.id) ?? [],
+        allocations: allocationsByAthleteId.get(athlete.id) ?? [],
+        exemptions: exemptionsByAthleteId.get(athlete.id) ?? []
       })
     };
   });
@@ -127,14 +147,28 @@ export async function getAthleteMembershipSummary(input: {
   athleteId: string;
 }): Promise<MembershipSummary> {
   if (!input.clubId || !isSupabaseConfigured()) {
-    return calculateMembershipSummary({ monthlyFee: DEFAULT_MONTHLY_MEMBERSHIP_FEE, payments: [] });
+    return calculateMembershipSummary({
+      monthlyFee: DEFAULT_MONTHLY_MEMBERSHIP_FEE,
+      membership: null,
+      payments: [],
+      allocations: [],
+      exemptions: []
+    });
   }
 
-  const paymentsByAthleteId = await loadPaymentsByAthleteId(input.clubId, [input.athleteId]);
+  const [paymentsByAthleteId, membershipsByAthleteId, allocationsByAthleteId, exemptionsByAthleteId] = await Promise.all([
+    loadPaymentsByAthleteId(input.clubId, [input.athleteId]),
+    loadMembershipsByAthleteId(input.clubId, [input.athleteId]),
+    loadMembershipAllocationsByAthleteId(input.clubId, [input.athleteId]),
+    loadMembershipExemptionsByAthleteId(input.clubId, [input.athleteId])
+  ]);
 
   return calculateMembershipSummary({
     monthlyFee: DEFAULT_MONTHLY_MEMBERSHIP_FEE,
-    payments: paymentsByAthleteId.get(input.athleteId) ?? []
+    membership: membershipsByAthleteId.get(input.athleteId) ?? null,
+    payments: paymentsByAthleteId.get(input.athleteId) ?? [],
+    allocations: allocationsByAthleteId.get(input.athleteId) ?? [],
+    exemptions: exemptionsByAthleteId.get(input.athleteId) ?? []
   });
 }
 

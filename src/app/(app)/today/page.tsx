@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getSessionContext } from "@/features/auth/server/session";
-import { getMembershipDashboardSummary } from "@/features/payments/server/payment-read-models";
+import { getTodayCommandCenterView, type TodayCommandCenterView } from "@/features/today/server/today-read-models";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -25,7 +25,7 @@ import { formatDateMk } from "@/shared/lib/date-format";
 
 type KpiItem = {
   label: string;
-  value: string;
+  value: string | number;
   description: string;
   icon: LucideIcon;
 };
@@ -52,35 +52,8 @@ type QuickAction = {
   disabled?: boolean;
 };
 
-// TODO: Replace these UI-only placeholders with real read models when attendance,
-// memberships and athlete profile completeness are implemented.
-const todayKpis: KpiItem[] = [
-  {
-    label: "Активни членови",
-    value: "41",
-    description: "Во две активни групи",
-    icon: Users
-  },
-  {
-    label: "Неплатени членарини",
-    value: "8",
-    description: "Потребна проверка",
-    icon: CreditCard
-  },
-  {
-    label: "Тренинзи денес",
-    value: "3",
-    description: "Прв тренинг во 18:00",
-    icon: CalendarClock
-  },
-  {
-    label: "Отсутни > 30 дена",
-    value: "3",
-    description: "За контакт со родители",
-    icon: AlertTriangle
-  }
-];
-
+// TODO: Replace this controlled placeholder with the real training schedule model
+// after the club confirms how training sessions are scheduled.
 const trainingsToday: TrainingItem[] = [
   {
     group: "U10",
@@ -96,37 +69,6 @@ const trainingsToday: TrainingItem[] = [
     group: "U14",
     time: "20:00",
     athleteCount: 14
-  }
-];
-
-const attentionItems: AttentionItem[] = [
-  {
-    label: "8 неплатени членарини",
-    description: "Проверка пред крај на месец",
-    href: "/payments",
-    icon: CreditCard,
-    tone: "warning"
-  },
-  {
-    label: "3 отсутни повеќе од 30 дена",
-    description: "Потребен контакт со родител",
-    href: "/attendance",
-    icon: AlertTriangle,
-    tone: "danger"
-  },
-  {
-    label: "4 спортисти без фотографија",
-    description: "Дополнување на профил",
-    href: "/athletes",
-    icon: Camera,
-    tone: "primary"
-  },
-  {
-    label: "2 спортисти без комплетен профил",
-    description: "Недостасуваат основни податоци",
-    href: "/athletes",
-    icon: UserRoundPlus,
-    tone: "neutral"
   }
 ];
 
@@ -151,9 +93,9 @@ const quickActions: QuickAction[] = [
   },
   {
     label: "Порака",
-    description: "Ќе биде достапно подоцна",
-    icon: MessageSquare,
-    disabled: true
+    description: "Испрати преку профил на спортист",
+    href: "/athletes",
+    icon: MessageSquare
   }
 ];
 
@@ -177,20 +119,12 @@ function getFirstName(displayName: string) {
 
 export default async function TodayPage() {
   const sessionContext = await getSessionContext();
-  const membershipSummary = await getMembershipDashboardSummary(sessionContext);
+  const todayView = await getTodayCommandCenterView(sessionContext);
   const now = new Date();
   const featuredTraining = trainingsToday[1] ?? trainingsToday[0] ?? null;
   const otherTrainings = trainingsToday.filter((training) => training !== featuredTraining);
-  const resolvedTodayKpis = todayKpis.map((item) =>
-    item.icon === CreditCard
-      ? {
-          ...item,
-          label: "Неплатени членарини",
-          value: String(membershipSummary.unpaidAthletes),
-          description: "Пресметано од зачувани уплати"
-        }
-      : item
-  );
+  const kpis = buildKpis(todayView, trainingsToday);
+  const attentionItems = buildAttentionItems(todayView);
 
   return (
     <PageContainer className="space-y-xl">
@@ -201,7 +135,7 @@ export default async function TodayPage() {
           <div className="max-w-3xl">
             <Badge className="border-gold/30 bg-gold/15 text-gold">Judo Drim</Badge>
             <h1 className="mt-md text-3xl font-semibold tracking-tight md:text-4xl">
-              {getGreeting(now)}, {getFirstName(sessionContext.displayName)} 👋
+              {getGreeting(now)}, {getFirstName(sessionContext.displayName)}
             </h1>
             <p className="mt-sm text-body leading-7 text-slate-300">
               Денешен оперативен преглед за тренинзи, задачи и брзи акции.
@@ -215,7 +149,7 @@ export default async function TodayPage() {
       </section>
 
       <section className="grid gap-md sm:grid-cols-2 xl:grid-cols-4" aria-label="Дневни показатели">
-        {resolvedTodayKpis.map((item) => (
+        {kpis.map((item) => (
           <StatCard
             key={item.label}
             icon={item.icon}
@@ -269,7 +203,7 @@ export default async function TodayPage() {
                 <EmptyState
                   icon={CalendarClock}
                   title="Нема тренинзи денес"
-                  description="Кога ќе постои распоред, следниот тренинг ќе се појави овде."
+                  description="Кога ќе постои реален распоред, следниот тренинг ќе се појави овде."
                 />
               </CardContent>
             )}
@@ -368,6 +302,68 @@ export default async function TodayPage() {
       </section>
     </PageContainer>
   );
+}
+
+function buildKpis(todayView: TodayCommandCenterView, trainings: TrainingItem[]): KpiItem[] {
+  return [
+    {
+      label: "Активни членови",
+      value: todayView.activeAthletes,
+      description: `Во ${todayView.activeGroupsWithAthletes} активни ${todayView.activeGroupsWithAthletes === 1 ? "група" : "групи"}`,
+      icon: Users
+    },
+    {
+      label: "Неплатени членарини",
+      value: todayView.unpaidMemberships,
+      description: "Пресметано од зачувани уплати",
+      icon: CreditCard
+    },
+    {
+      label: "Тренинзи денес",
+      value: trainings.length,
+      description: trainings[0] ? `Прв тренинг во ${trainings[0].time}` : "Нема тренинзи денес",
+      icon: CalendarClock
+    },
+    {
+      label: "Отсутни > 30 дена",
+      value: todayView.absentOver30Days,
+      description: "Според евиденција на присуство",
+      icon: AlertTriangle
+    }
+  ];
+}
+
+function buildAttentionItems(todayView: TodayCommandCenterView): AttentionItem[] {
+  return [
+    {
+      label: `${todayView.unpaidMemberships} неплатени членарини`,
+      description: "Проверка пред крај на месец",
+      href: "/payments",
+      icon: CreditCard,
+      tone: "warning"
+    },
+    {
+      label: `${todayView.absentOver30Days} отсутни повеќе од 30 дена`,
+      description: "Потребен контакт со родител",
+      href: "/attendance",
+      icon: AlertTriangle,
+      tone: "danger"
+    },
+    {
+      label: `${todayView.athletesWithoutPhoto} спортисти без фотографија`,
+      description: "Дополнување на профил",
+      href: "/athletes",
+      icon: Camera,
+      tone: "primary"
+    },
+    {
+      label: `${todayView.incompleteAthleteProfiles} спортисти без комплетен профил`,
+      description: "Недостасуваат основни податоци",
+      href: "/athletes",
+      icon: UserRoundPlus,
+      tone: "neutral"
+    }
+  ];
 }
 
 function QuickActionCard({ action }: { action: QuickAction }) {

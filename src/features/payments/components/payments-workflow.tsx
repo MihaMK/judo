@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useActionState, useMemo, useState } from "react";
 import { Banknote, CheckCircle2, CreditCard, Search, ShieldAlert, UserPlus, Users } from "lucide-react";
@@ -13,10 +13,8 @@ import { Select } from "@/shared/ui/select";
 import { StatCard } from "@/shared/ui/stat-card";
 import { cn } from "@/shared/lib/cn";
 import {
-  calculateMonthsCovered,
-  calculatePaidThroughDate,
+  calculatePaymentAllocationPreview,
   formatCurrency,
-  formatMonthLabel,
   formatPaymentMethod,
   type PaymentAthlete,
   type PaymentMethod
@@ -302,18 +300,18 @@ function PaymentEntryPanel({
 }) {
   const amountValue = Number(amount);
   const monthlyFee = selectedAthlete?.membership.monthlyFee ?? 1000;
-  const paidMonths = Number.isFinite(amountValue) && amountValue > 0 ? calculateMonthsCovered(amountValue, monthlyFee) : 0;
-  const remainder = Number.isFinite(amountValue) && amountValue > 0 ? amountValue % monthlyFee : 0;
-  const previewPaidThrough =
-    selectedAthlete && paidMonths > 0
-      ? calculatePaidThroughDate({
-          existingPaidThroughDate: selectedAthlete.membership.paidThroughDate,
-          paymentDate: getTodayDate(),
-          amount: amountValue,
-          monthlyFee
-        })
-      : null;
-  const previewPaidUntil = previewPaidThrough ? formatMonthLabel(previewPaidThrough) : "Нема цел месец";
+  const allocationPreview = selectedAthlete && Number.isFinite(amountValue) && amountValue > 0
+    ? calculatePaymentAllocationPreview({
+        amount: amountValue,
+        monthlyFee,
+        startMonth: selectedAthlete.membership.startMonth,
+        paidMembershipMonths: selectedAthlete.membership.paidMembershipMonths,
+        exemptMembershipMonths: selectedAthlete.membership.exemptMembershipMonths
+      })
+    : null;
+  const paidMonths = allocationPreview?.monthsCovered ?? 0;
+  const remainder = allocationPreview?.remainder ?? 0;
+  const previewPaidUntil = allocationPreview?.coveredMonths.at(-1)?.label ?? "Нема цел месец";
 
   return (
     <Card variant="elevated" className="overflow-hidden">
@@ -426,8 +424,24 @@ function PaymentEntryPanel({
 
             <div className="rounded-card border border-border bg-subdued/60 p-md">
               <p className="text-caption font-semibold uppercase tracking-[0.16em] text-muted-foreground">Пресметка</p>
-              <p className="mt-xs text-2xl font-semibold text-foreground">{paidMonths} месеци</p>
-              <p className="mt-xs text-body text-muted-foreground">Платено до: {previewPaidUntil}</p>
+              <p className="mt-xs text-2xl font-semibold text-foreground">{paidMonths} {paidMonths === 1 ? "месец" : "месеци"}</p>
+              <p className="mt-xs text-body text-muted-foreground">Последен покриен месец: {previewPaidUntil}</p>
+              {allocationPreview?.coveredMonths.length ? (
+                <div className="mt-sm space-y-xs text-sm text-muted-foreground">
+                  <p className="font-semibold text-foreground">Ќе се покријат:</p>
+                  <p>{allocationPreview.coveredMonths.map((month) => month.label).join(", ")}</p>
+                </div>
+              ) : null}
+              {allocationPreview?.skippedMonths.length ? (
+                <div className="mt-sm space-y-xs text-sm text-muted-foreground">
+                  <p className="font-semibold text-foreground">Прескокнати месеци:</p>
+                  <p>
+                    {allocationPreview.skippedMonths
+                      .map((month) => month.label + " (" + (month.reason === "july" ? "јули не се наплаќа" : "ослободен месец") + ")")
+                      .join(", ")}
+                  </p>
+                </div>
+              ) : null}
               {remainder > 0 ? (
                 <p className="mt-sm text-sm text-warning-foreground">
                   Ќе се евидентираат {paidMonths} {paidMonths === 1 ? "месец" : "месеци"}. Остатокот не се обработува во V1.
@@ -491,3 +505,4 @@ function FilterButton({ active, label, onClick }: { active: boolean; label: stri
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
 }
+
