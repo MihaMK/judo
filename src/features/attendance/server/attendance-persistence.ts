@@ -6,8 +6,8 @@ import type { AttendanceSessionView, AttendanceStatus, AttendanceTrainingOption 
 type AthleteRow = {
   id: string;
   full_name: string;
-  birth_date: string;
-  current_belt_text: string;
+  birth_date: string | null;
+  current_belt_text: string | null;
 };
 
 type TrainingGroupRow = {
@@ -15,15 +15,20 @@ type TrainingGroupRow = {
   name: string;
 };
 
-type SessionRow = {
+type ScheduledSessionRow = {
   id: string;
-  notes: string;
+  training_group_id: string;
+  scheduled_date: string;
+  scheduled_time: string;
+  session_type: "regular" | "extra";
+  status: "scheduled" | "completed" | "rescheduled" | "cancelled";
+  notes: string | null;
 };
 
 type EntryRow = {
   athlete_id: string;
   status: AttendanceStatus;
-  note: string;
+  note: string | null;
 };
 
 type SupabaseErrorLike = {
@@ -53,97 +58,52 @@ export type SaveAttendanceInput = {
 
 export type SaveAttendanceEntryInput = {
   clubId: string;
-  groupId: string;
-  sessionDate: string;
+  sessionId: string;
   userProfileId: string;
   athleteId: string;
   status: Extract<AttendanceStatus, "present" | "absent">;
 };
 
-// TODO: Replace these UI-only times when a real training schedule model exists.
-const TRAINING_TIME_PRESETS = ["18:00", "19:00", "20:00"];
-
 export async function loadAttendanceTrainingOptions(input: {
   clubId: string;
   sessionDate: string;
 }): Promise<AttendanceTrainingOption[]> {
-  const groups = await loadTrainingGroups(input.clubId);
-
-  return Promise.all(
-    groups.map(async (group, index) => {
-      const trainingTime = TRAINING_TIME_PRESETS[index] ?? `${18 + index}:00`;
-      const session = await loadAttendanceSessionView({
-        clubId: input.clubId,
-        groupId: group.id,
-        groupName: group.name,
-        sessionDate: input.sessionDate,
-        trainingTime
-      });
-
-      return {
-        groupId: group.id,
-        groupName: group.name,
-        trainingTime,
-        expectedAthletes: session.athletes.length,
-        session
-      };
-    })
-  );
-}
-
-export async function loadAttendanceSessionView(input: {
-  clubId: string;
-  groupId: string;
-  groupName: string;
-  sessionDate: string;
-  trainingTime?: string;
-}): Promise<AttendanceSessionView> {
-  const athletes = await loadGroupAthletes(input.clubId, input.groupId);
-  const session = await loadExistingSession(input.clubId, input.groupId, input.sessionDate);
-  const entries = session ? await loadExistingEntries(input.clubId, session.id) : new Map<string, EntryRow>();
-
-  return {
-    sessionId: session?.id ?? null,
-    groupId: input.groupId,
-    groupName: input.groupName,
-    sessionDate: input.sessionDate,
-    trainingTime: input.trainingTime,
-    notes: session?.notes ?? "",
-    athletes: athletes.map((athlete) => {
-      const existingEntry = entries.get(athlete.id);
-
-      return {
-        id: athlete.id,
-        fullName: athlete.full_name,
-        birthYear: new Date(`${athlete.birth_date}T00:00:00Z`).getUTCFullYear(),
-        currentBelt: athlete.current_belt_text,
-        existingStatus: existingEntry?.status ?? "present",
-        existingNote: existingEntry?.note ?? ""
-      };
-    })
-  };
-}
-
-async function loadTrainingGroups(clubId: string): Promise<TrainingGroupRow[]> {
   if (!isSupabaseConfigured()) {
     return [];
   }
 
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from("training_groups")
-    .select("id, name")
-    .eq("club_id", clubId)
-    .eq("is_active", true)
-    .is("deleted_at", null)
-    .order("display_order", { ascending: true })
-    .order("name", { ascending: true });
+  const sessions = await loadScheduledSessions(input.clubId, input.sessionDate);
 
-  if (error) {
-    throw new Error(`Unable to load attendance training groups: ${error.message}`);
+  if (sessions.length === 0) {
+    return [];
   }
 
-  return data as TrainingGroupRow[];
+  const groups = await loadTrainingGroupsByIds(
+    input.clubId,
+    Array.from(new Set(sessions.map((session) => session.training_group_id)))
+  );
+
+  return Promise.all(
+    sessions.map(async (session) => {
+      const groupName = groups.get(session.training_group_id)?.name ?? "Непозната група";
+      const view = await buildAttendanceSessionView({
+        clubId: input.clubId,
+        session,
+        groupName
+      });
+
+      return {
+        sessionId: session.id,
+        groupId: session.training_group_id,
+        groupName,
+        trainingTime: formatSessionTime(session.scheduled_time),
+        sessionType: session.session_type,
+        status: normalizeSessionStatus(session.status),
+        expectedAthletes: view.athletes.length,
+        session: view
+      };
+    })
+  );
 }
 
 export async function saveAttendanceSession(input: SaveAttendanceInput): Promise<string> {
@@ -153,7 +113,8 @@ export async function saveAttendanceSession(input: SaveAttendanceInput): Promise
     .select("id")
     .eq("club_id", input.clubId)
     .eq("training_group_id", input.groupId)
-    .eq("session_date", input.sessionDate)
+    .eq("scheduled_date", input.sessionDate)
+    .eq("scheduled_time", "00:00")
     .is("deleted_at", null)
     .maybeSingle();
 
@@ -180,6 +141,10 @@ export async function saveAttendanceSession(input: SaveAttendanceInput): Promise
           club_id: input.clubId,
           training_group_id: input.groupId,
           session_date: input.sessionDate,
+          scheduled_date: input.sessionDate,
+          scheduled_time: "00:00",
+          session_type: "regular",
+          status: "scheduled",
           trainer_user_profile_id: input.userProfileId,
           created_by_user_profile_id: input.userProfileId,
           notes: input.notes
@@ -192,17 +157,180 @@ export async function saveAttendanceSession(input: SaveAttendanceInput): Promise
     throw new Error(`Unable to save attendance session: ${sessionError.message}`);
   }
 
-  const sessionId = session.id;
+  await saveAttendanceEntries({
+    clubId: input.clubId,
+    sessionId: session.id,
+    entries: input.entries
+  });
 
-  if (input.entries.length === 0) {
-    return sessionId;
+  return session.id;
+}
+
+export async function saveAttendanceEntry(input: SaveAttendanceEntryInput): Promise<string> {
+  const admin = createAdminSupabaseClient();
+  const { data: session, error: sessionError } = await admin
+    .from("attendance_sessions")
+    .select("id, training_group_id, status")
+    .eq("id", input.sessionId)
+    .eq("club_id", input.clubId)
+    .is("deleted_at", null)
+    .single();
+
+  if (sessionError) {
+    throwAttendanceSchemaMissingError(sessionError);
+    throw new Error(`Unable to inspect attendance session: ${sessionError.message}`);
   }
 
+  if (!session || session.status === "cancelled") {
+    throw new Error("Овој тренинг е откажан и не може да се евидентира присуство.");
+  }
+
+  const { data: athlete, error: athleteError } = await admin
+    .from("athletes")
+    .select("id")
+    .eq("id", input.athleteId)
+    .eq("club_id", input.clubId)
+    .eq("current_group_id", session.training_group_id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (athleteError) {
+    throw new Error(`Unable to validate attendance athlete: ${athleteError.message}`);
+  }
+
+  if (!athlete) {
+    throw new Error("Спортистот не припаѓа на избраниот тренинг.");
+  }
+
+  const { data: existingEntry, error: existingEntryError } = await admin
+    .from("attendance_entries")
+    .select("id")
+    .eq("club_id", input.clubId)
+    .eq("attendance_session_id", input.sessionId)
+    .eq("athlete_id", input.athleteId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (existingEntryError) {
+    throwAttendanceSchemaMissingError(existingEntryError);
+    throw new Error(`Unable to inspect attendance entry: ${existingEntryError.message}`);
+  }
+
+  const { error: entryError } = existingEntry
+    ? await admin
+        .from("attendance_entries")
+        .update({
+          status: input.status,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", existingEntry.id)
+        .eq("club_id", input.clubId)
+    : await admin.from("attendance_entries").insert({
+        club_id: input.clubId,
+        attendance_session_id: input.sessionId,
+        athlete_id: input.athleteId,
+        status: input.status,
+        note: ""
+      });
+
+  if (entryError) {
+    throwAttendanceSchemaMissingError(entryError);
+    throw new Error(`Unable to save attendance entry: ${entryError.message}`);
+  }
+
+  return input.sessionId;
+}
+
+async function buildAttendanceSessionView(input: {
+  clubId: string;
+  session: ScheduledSessionRow;
+  groupName: string;
+}): Promise<AttendanceSessionView> {
+  const athletes = await loadGroupAthletes(input.clubId, input.session.training_group_id);
+  const entries = await loadExistingEntries(input.clubId, input.session.id);
+
+  return {
+    sessionId: input.session.id,
+    groupId: input.session.training_group_id,
+    groupName: input.groupName,
+    sessionDate: input.session.scheduled_date,
+    trainingTime: formatSessionTime(input.session.scheduled_time),
+    sessionType: input.session.session_type,
+    status: normalizeSessionStatus(input.session.status),
+    notes: input.session.notes ?? "",
+    athletes: athletes.map((athlete) => {
+      const existingEntry = entries.get(athlete.id);
+
+      return {
+        id: athlete.id,
+        fullName: athlete.full_name,
+        birthYear: athlete.birth_date ? new Date(`${athlete.birth_date}T00:00:00Z`).getUTCFullYear() : 0,
+        currentBelt: athlete.current_belt_text ?? "",
+        existingStatus: existingEntry?.status ?? "present",
+        existingNote: existingEntry?.note ?? ""
+      };
+    })
+  };
+}
+
+async function loadScheduledSessions(clubId: string, sessionDate: string): Promise<ScheduledSessionRow[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("attendance_sessions")
+    .select("id, training_group_id, scheduled_date, scheduled_time, session_type, status, notes")
+    .eq("club_id", clubId)
+    .eq("scheduled_date", sessionDate)
+    .neq("status", "cancelled")
+    .is("deleted_at", null)
+    .order("scheduled_time", { ascending: true });
+
+  if (error) {
+    throwAttendanceSchemaMissingError(error);
+    throw new Error(`Unable to load attendance sessions: ${error.message}`);
+  }
+
+  return (data ?? []) as ScheduledSessionRow[];
+}
+
+async function loadTrainingGroupsByIds(clubId: string, groupIds: string[]): Promise<Map<string, TrainingGroupRow>> {
+  if (groupIds.length === 0) {
+    return new Map();
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("training_groups")
+    .select("id, name")
+    .eq("club_id", clubId)
+    .in("id", groupIds)
+    .is("deleted_at", null);
+
+  if (error) {
+    throw new Error(`Unable to load attendance training groups: ${error.message}`);
+  }
+
+  return new Map(((data ?? []) as TrainingGroupRow[]).map((group) => [group.id, group]));
+}
+
+async function saveAttendanceEntries(input: {
+  clubId: string;
+  sessionId: string;
+  entries: Array<{
+    athleteId: string;
+    status: AttendanceStatus;
+    note: string;
+  }>;
+}) {
+  if (input.entries.length === 0) {
+    return;
+  }
+
+  const admin = createAdminSupabaseClient();
   const { data: existingEntries, error: existingEntriesError } = await admin
     .from("attendance_entries")
     .select("id, athlete_id")
     .eq("club_id", input.clubId)
-    .eq("attendance_session_id", sessionId)
+    .eq("attendance_session_id", input.sessionId)
     .is("deleted_at", null);
 
   if (existingEntriesError) {
@@ -210,13 +338,15 @@ export async function saveAttendanceSession(input: SaveAttendanceInput): Promise
     throw new Error(`Unable to inspect attendance entries: ${existingEntriesError.message}`);
   }
 
-  const existingByAthlete = new Map((existingEntries as Array<{ id: string; athlete_id: string }>).map((entry) => [entry.athlete_id, entry.id]));
+  const existingByAthlete = new Map(
+    (existingEntries as Array<{ id: string; athlete_id: string }>).map((entry) => [entry.athlete_id, entry.id])
+  );
   const now = new Date().toISOString();
   const inserts = input.entries
     .filter((entry) => !existingByAthlete.has(entry.athleteId))
     .map((entry) => ({
       club_id: input.clubId,
-      attendance_session_id: sessionId,
+      attendance_session_id: input.sessionId,
       athlete_id: entry.athleteId,
       status: entry.status,
       note: entry.note
@@ -248,99 +378,9 @@ export async function saveAttendanceSession(input: SaveAttendanceInput): Promise
       throw new Error(`Unable to update attendance entry: ${error.message}`);
     }
   }
-
-  return sessionId;
-}
-
-export async function saveAttendanceEntry(input: SaveAttendanceEntryInput): Promise<string> {
-  const admin = createAdminSupabaseClient();
-  const { data: existingSession, error: existingSessionError } = await admin
-    .from("attendance_sessions")
-    .select("id")
-    .eq("club_id", input.clubId)
-    .eq("training_group_id", input.groupId)
-    .eq("session_date", input.sessionDate)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (existingSessionError) {
-    throwAttendanceSchemaMissingError(existingSessionError);
-    throw new Error(`Unable to inspect attendance session: ${existingSessionError.message}`);
-  }
-
-  const { data: session, error: sessionError } = existingSession
-    ? await admin
-        .from("attendance_sessions")
-        .update({
-          trainer_user_profile_id: input.userProfileId,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", existingSession.id)
-        .eq("club_id", input.clubId)
-        .select("id")
-        .single()
-    : await admin
-        .from("attendance_sessions")
-        .insert({
-          club_id: input.clubId,
-          training_group_id: input.groupId,
-          session_date: input.sessionDate,
-          trainer_user_profile_id: input.userProfileId,
-          created_by_user_profile_id: input.userProfileId
-        })
-        .select("id")
-        .single();
-
-  if (sessionError) {
-    throwAttendanceSchemaMissingError(sessionError);
-    throw new Error(`Unable to save attendance session: ${sessionError.message}`);
-  }
-
-  const sessionId = session.id;
-  const { data: existingEntry, error: existingEntryError } = await admin
-    .from("attendance_entries")
-    .select("id")
-    .eq("club_id", input.clubId)
-    .eq("attendance_session_id", sessionId)
-    .eq("athlete_id", input.athleteId)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (existingEntryError) {
-    throwAttendanceSchemaMissingError(existingEntryError);
-    throw new Error(`Unable to inspect attendance entry: ${existingEntryError.message}`);
-  }
-
-  const { error: entryError } = existingEntry
-    ? await admin
-        .from("attendance_entries")
-        .update({
-          status: input.status,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", existingEntry.id)
-        .eq("club_id", input.clubId)
-    : await admin.from("attendance_entries").insert({
-        club_id: input.clubId,
-        attendance_session_id: sessionId,
-        athlete_id: input.athleteId,
-        status: input.status,
-        note: ""
-      });
-
-  if (entryError) {
-    throwAttendanceSchemaMissingError(entryError);
-    throw new Error(`Unable to save attendance entry: ${entryError.message}`);
-  }
-
-  return sessionId;
 }
 
 async function loadGroupAthletes(clubId: string, groupId: string): Promise<AthleteRow[]> {
-  if (!isSupabaseConfigured()) {
-    return [];
-  }
-
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("athletes")
@@ -356,29 +396,6 @@ async function loadGroupAthletes(clubId: string, groupId: string): Promise<Athle
   }
 
   return data as AthleteRow[];
-}
-
-async function loadExistingSession(clubId: string, groupId: string, sessionDate: string): Promise<SessionRow | null> {
-  if (!isSupabaseConfigured()) {
-    return null;
-  }
-
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from("attendance_sessions")
-    .select("id, notes")
-    .eq("club_id", clubId)
-    .eq("training_group_id", groupId)
-    .eq("session_date", sessionDate)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (error) {
-    throwAttendanceSchemaMissingError(error);
-    throw new Error(`Unable to load attendance session: ${error.message}`);
-  }
-
-  return data as SessionRow | null;
 }
 
 async function loadExistingEntries(clubId: string, sessionId: string) {
@@ -410,8 +427,19 @@ function throwAttendanceSchemaMissingError(error: SupabaseErrorLike) {
 
 function isMissingAttendanceTableError(error: SupabaseErrorLike) {
   return (
-    error.code === "PGRST205" &&
+    (error.code === "PGRST205" || error.code === "PGRST204" || error.code === "42703" || error.code === "42P01") &&
     typeof error.message === "string" &&
-    (error.message.includes("attendance_sessions") || error.message.includes("attendance_entries"))
+    (error.message.includes("attendance_sessions") ||
+      error.message.includes("attendance_entries") ||
+      error.message.includes("scheduled_date") ||
+      error.message.includes("scheduled_time"))
   );
+}
+
+function normalizeSessionStatus(status: ScheduledSessionRow["status"]) {
+  return status === "cancelled" ? "scheduled" : status;
+}
+
+function formatSessionTime(value: string) {
+  return value.slice(0, 5);
 }

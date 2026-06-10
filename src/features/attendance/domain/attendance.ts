@@ -12,19 +12,24 @@ export type AttendanceAthlete = {
 };
 
 export type AttendanceSessionView = {
-  sessionId: string | null;
+  sessionId: string;
   groupId: string;
   groupName: string;
   sessionDate: string;
-  trainingTime?: string;
+  trainingTime: string;
+  sessionType: "regular" | "extra";
+  status: "scheduled" | "completed" | "rescheduled";
   notes: string;
   athletes: AttendanceAthlete[];
 };
 
 export type AttendanceTrainingOption = {
+  sessionId: string;
   groupId: string;
   groupName: string;
   trainingTime: string;
+  sessionType: "regular" | "extra";
+  status: "scheduled" | "completed" | "rescheduled";
   expectedAthletes: number;
   session: AttendanceSessionView;
 };

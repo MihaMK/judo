@@ -14,7 +14,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getSessionContext } from "@/features/auth/server/session";
+import { isSchedulerSchemaMissingError, loadTodayTrainingSessions } from "@/features/scheduler/server/scheduler-persistence";
 import { getTodayCommandCenterView, type TodayCommandCenterView } from "@/features/today/server/today-read-models";
+import type { TrainingSessionSummary } from "@/features/scheduler/domain/scheduler";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -28,12 +30,6 @@ type KpiItem = {
   value: string | number;
   description: string;
   icon: LucideIcon;
-};
-
-type TrainingItem = {
-  group: string;
-  time: string;
-  athleteCount: number;
 };
 
 type AttentionItem = {
@@ -51,26 +47,6 @@ type QuickAction = {
   icon: LucideIcon;
   disabled?: boolean;
 };
-
-// TODO: Replace this controlled placeholder with the real training schedule model
-// after the club confirms how training sessions are scheduled.
-const trainingsToday: TrainingItem[] = [
-  {
-    group: "U10",
-    time: "18:00",
-    athleteCount: 12
-  },
-  {
-    group: "U12",
-    time: "19:00",
-    athleteCount: 15
-  },
-  {
-    group: "U14",
-    time: "20:00",
-    athleteCount: 14
-  }
-];
 
 const quickActions: QuickAction[] = [
   {
@@ -99,30 +75,24 @@ const quickActions: QuickAction[] = [
   }
 ];
 
-function getGreeting(date: Date) {
-  const hour = date.getHours();
-
-  if (hour < 12) {
-    return "Добро утро";
-  }
-
-  if (hour < 18) {
-    return "Добар ден";
-  }
-
-  return "Добра вечер";
-}
-
-function getFirstName(displayName: string) {
-  return displayName.trim().split(/\s+/)[0] || "тренеру";
-}
-
 export default async function TodayPage() {
   const sessionContext = await getSessionContext();
   const todayView = await getTodayCommandCenterView(sessionContext);
   const now = new Date();
-  const featuredTraining = trainingsToday[1] ?? trainingsToday[0] ?? null;
-  const otherTrainings = trainingsToday.filter((training) => training !== featuredTraining);
+  const today = getTodayDateSkopje(now);
+  let trainingsToday: TrainingSessionSummary[] = [];
+
+  if (sessionContext.clubId) {
+    try {
+      trainingsToday = await loadTodayTrainingSessions({ clubId: sessionContext.clubId, date: today });
+    } catch (error) {
+      if (!isSchedulerSchemaMissingError(error)) {
+        throw error;
+      }
+    }
+  }
+  const featuredTraining = trainingsToday[0] ?? null;
+  const otherTrainings = trainingsToday.slice(1);
   const kpis = buildKpis(todayView, trainingsToday);
   const attentionItems = buildAttentionItems(todayView);
 
@@ -150,13 +120,7 @@ export default async function TodayPage() {
 
       <section className="grid gap-md sm:grid-cols-2 xl:grid-cols-4" aria-label="Дневни показатели">
         {kpis.map((item) => (
-          <StatCard
-            key={item.label}
-            icon={item.icon}
-            label={item.label}
-            value={item.value}
-            description={item.description}
-          />
+          <StatCard key={item.label} icon={item.icon} label={item.label} value={item.value} description={item.description} />
         ))}
       </section>
 
@@ -175,20 +139,7 @@ export default async function TodayPage() {
             {featuredTraining ? (
               <CardContent className="p-lg">
                 <div className="grid gap-lg md:grid-cols-[1fr_auto] md:items-end">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-sm">
-                      <span className="flex h-14 w-14 items-center justify-center rounded-card bg-slate-950 text-xl font-semibold text-gold shadow-soft">
-                        {featuredTraining.group}
-                      </span>
-                      <div>
-                        <p className="text-4xl font-semibold tracking-tight text-foreground">{featuredTraining.time}</p>
-                        <p className="mt-xs text-body text-muted-foreground">{featuredTraining.athleteCount} спортисти во група</p>
-                      </div>
-                    </div>
-                    <p className="mt-lg max-w-2xl text-body leading-7 text-muted-foreground">
-                      Подготви го списокот за присуство пред почетокот на тренингот.
-                    </p>
-                  </div>
+                  <TrainingFeature training={featuredTraining} />
                   <Link
                     href="/attendance"
                     className="inline-flex min-h-control-lg items-center justify-center gap-sm rounded-button bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-soft transition-colors duration-ui hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
@@ -203,7 +154,7 @@ export default async function TodayPage() {
                 <EmptyState
                   icon={CalendarClock}
                   title="Нема тренинзи денес"
-                  description="Кога ќе постои реален распоред, следниот тренинг ќе се појави овде."
+                  description="Кога ќе се генерира месечниот распоред, следниот тренинг ќе се појави овде."
                 />
               </CardContent>
             )}
@@ -217,11 +168,11 @@ export default async function TodayPage() {
               {otherTrainings.length > 0 ? (
                 <div className="grid gap-sm sm:grid-cols-2">
                   {otherTrainings.map((training) => (
-                    <div key={`${training.time}-${training.group}`} className="rounded-card border border-border bg-muted/30 p-md">
+                    <div key={training.id} className="rounded-card border border-border bg-muted/30 p-md">
                       <div className="flex items-center justify-between gap-md">
                         <div>
                           <p className="text-xl font-semibold text-foreground">{training.time}</p>
-                          <p className="mt-xs text-body text-muted-foreground">{training.group}</p>
+                          <p className="mt-xs text-body text-muted-foreground">{training.groupName}</p>
                         </div>
                         <div className="rounded-full border border-border bg-surface px-3 py-1 text-caption font-semibold text-muted-foreground">
                           {training.athleteCount} спортисти
@@ -234,7 +185,7 @@ export default async function TodayPage() {
                 <EmptyState
                   icon={Clock3}
                   title="Нема други тренинзи денес"
-                  description="Следниот тренинг е единствената активност во распоредот."
+                  description="Следниот тренинг е единствената активност во денешниот распоред."
                 />
               )}
             </CardContent>
@@ -247,34 +198,11 @@ export default async function TodayPage() {
               <CardTitle>Бара внимание</CardTitle>
             </CardHeader>
             <CardContent>
-              {attentionItems.length > 0 ? (
-                <div className="space-y-sm">
-                  {attentionItems.map((item) => (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      className="group flex items-center justify-between gap-md rounded-card border border-border bg-surface p-md shadow-soft transition-all duration-ui hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                    >
-                      <span className="flex min-w-0 items-center gap-sm">
-                        <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-card border", getAttentionToneClasses(item.tone))}>
-                          <item.icon className="h-4 w-4" aria-hidden="true" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-body font-semibold text-foreground">{item.label}</span>
-                          <span className="mt-0.5 block truncate text-caption text-muted-foreground">{item.description}</span>
-                        </span>
-                      </span>
-                      <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-ui group-hover:translate-x-0.5" aria-hidden="true" />
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  icon={CheckCircle2}
-                  title="Нема ставки за внимание"
-                  description="Сите денешни оперативни проверки се чисти."
-                />
-              )}
+              <div className="space-y-sm">
+                {attentionItems.map((item) => (
+                  <AttentionLink key={item.label} item={item} />
+                ))}
+              </div>
             </CardContent>
           </Card>
 
@@ -283,19 +211,11 @@ export default async function TodayPage() {
               <CardTitle>Брзи акции</CardTitle>
             </CardHeader>
             <CardContent>
-              {quickActions.length > 0 ? (
-                <div className="grid gap-sm sm:grid-cols-2 lg:grid-cols-1">
-                  {quickActions.map((action) => (
-                    <QuickActionCard key={action.label} action={action} />
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  icon={Plus}
-                  title="Нема достапни брзи акции"
-                  description="Акциите ќе се појават кога ќе бидат активни соодветните модули."
-                />
-              )}
+              <div className="grid gap-sm sm:grid-cols-2 lg:grid-cols-1">
+                {quickActions.map((action) => (
+                  <QuickActionCard key={action.label} action={action} />
+                ))}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -304,7 +224,79 @@ export default async function TodayPage() {
   );
 }
 
-function buildKpis(todayView: TodayCommandCenterView, trainings: TrainingItem[]): KpiItem[] {
+function TrainingFeature({ training }: { training: TrainingSessionSummary }) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-sm">
+        <span className="flex h-14 w-14 items-center justify-center rounded-card bg-slate-950 text-xl font-semibold text-gold shadow-soft">
+          {training.groupName.slice(0, 3)}
+        </span>
+        <div>
+          <p className="text-4xl font-semibold tracking-tight text-foreground">{training.time}</p>
+          <p className="mt-xs text-body text-muted-foreground">
+            {training.groupName} · {training.athleteCount} спортисти
+          </p>
+        </div>
+      </div>
+      <p className="mt-lg max-w-2xl text-body leading-7 text-muted-foreground">
+        Подгответе го списокот за присуство пред почетокот на тренингот.
+      </p>
+    </div>
+  );
+}
+
+function AttentionLink({ item }: { item: AttentionItem }) {
+  return (
+    <Link
+      href={item.href}
+      className="group flex items-center justify-between gap-md rounded-card border border-border bg-surface p-md shadow-soft transition-all duration-ui hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+    >
+      <span className="flex min-w-0 items-center gap-sm">
+        <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-card border", getAttentionToneClasses(item.tone))}>
+          <item.icon className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-body font-semibold text-foreground">{item.label}</span>
+          <span className="mt-0.5 block truncate text-caption text-muted-foreground">{item.description}</span>
+        </span>
+      </span>
+      <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-ui group-hover:translate-x-0.5" aria-hidden="true" />
+    </Link>
+  );
+}
+
+function QuickActionCard({ action }: { action: QuickAction }) {
+  const content = (
+    <>
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-card bg-slate-950 text-gold shadow-soft">
+        <action.icon className="h-5 w-5" aria-hidden="true" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-body font-semibold text-foreground">{action.label}</span>
+        <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">{action.description}</span>
+      </span>
+    </>
+  );
+
+  const className =
+    "flex min-h-20 items-center gap-md rounded-card border border-border bg-surface p-md text-left shadow-soft transition-all duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30";
+
+  if (action.disabled || !action.href) {
+    return (
+      <div className={cn(className, "cursor-not-allowed opacity-70")} aria-disabled="true">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link href={action.href} className={cn(className, "hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface")}>
+      {content}
+    </Link>
+  );
+}
+
+function buildKpis(todayView: TodayCommandCenterView, trainings: TrainingSessionSummary[]): KpiItem[] {
   return [
     {
       label: "Активни членови",
@@ -366,37 +358,6 @@ function buildAttentionItems(todayView: TodayCommandCenterView): AttentionItem[]
   ];
 }
 
-function QuickActionCard({ action }: { action: QuickAction }) {
-  const content = (
-    <>
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-card bg-slate-950 text-gold shadow-soft">
-        <action.icon className="h-5 w-5" aria-hidden="true" />
-      </span>
-      <span className="min-w-0">
-        <span className="block text-body font-semibold text-foreground">{action.label}</span>
-        <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">{action.description}</span>
-      </span>
-    </>
-  );
-
-  const className =
-    "flex min-h-20 items-center gap-md rounded-card border border-border bg-surface p-md text-left shadow-soft transition-all duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30";
-
-  if (action.disabled || !action.href) {
-    return (
-      <div className={cn(className, "cursor-not-allowed opacity-70")} aria-disabled="true">
-        {content}
-      </div>
-    );
-  }
-
-  return (
-    <Link href={action.href} className={cn(className, "hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface")}>
-      {content}
-    </Link>
-  );
-}
-
 function getAttentionToneClasses(tone: AttentionItem["tone"]) {
   switch (tone) {
     case "warning":
@@ -408,4 +369,31 @@ function getAttentionToneClasses(tone: AttentionItem["tone"]) {
     default:
       return "border-border bg-muted text-muted-foreground";
   }
+}
+
+function getGreeting(date: Date) {
+  const hour = date.getHours();
+
+  if (hour < 12) {
+    return "Добро утро";
+  }
+
+  if (hour < 18) {
+    return "Добар ден";
+  }
+
+  return "Добра вечер";
+}
+
+function getFirstName(displayName: string) {
+  return displayName.trim().split(/\s+/)[0] || "тренеру";
+}
+
+function getTodayDateSkopje(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Skopje",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
 }

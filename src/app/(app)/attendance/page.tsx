@@ -39,7 +39,7 @@ export default async function AttendancePage() {
         <EmptyState
           icon={ShieldAlert}
           title="Присуството не е подготвено"
-          description="Недостасува attendance schema во Supabase. Применете ја attendance миграцијата и освежете ја страницата."
+          description="Недостасува attendance/scheduler schema во Supabase. Применете ја миграцијата и освежете ја страницата."
         />
       </PageContainer>
     );

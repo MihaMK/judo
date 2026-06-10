@@ -1,4 +1,4 @@
-import { CalendarCheck, CreditCard, Home, Settings, Users } from "lucide-react";
+import { CalendarCheck, CalendarDays, CreditCard, Home, Settings, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { AppRole } from "@/features/auth/domain/roles";
 
@@ -21,6 +21,12 @@ export const navigationItems: NavigationItem[] = [
     href: "/attendance",
     icon: CalendarCheck,
     roles: ["management", "trainer", "parent"]
+  },
+  {
+    label: "Распоред",
+    href: "/management/schedule",
+    icon: CalendarDays,
+    roles: ["management", "trainer"]
   },
   {
     label: "Членарини",

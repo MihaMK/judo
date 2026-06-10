@@ -19,12 +19,12 @@ type AttendanceMark = "present" | "absent";
 type FilterMode = "all" | "absent";
 
 export function AttendanceWorkflow({ trainings }: AttendanceWorkflowProps) {
-  const [selectedGroupId, setSelectedGroupId] = useState(trainings[0]?.groupId ?? "");
+  const [selectedSessionId, setSelectedSessionId] = useState(trainings[0]?.sessionId ?? "");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
   const [saveLabel, setSaveLabel] = useState("Подготвено");
   const [isPending, startTransition] = useTransition();
-  const selectedTraining = trainings.find((training) => training.groupId === selectedGroupId) ?? trainings[0] ?? null;
+  const selectedTraining = trainings.find((training) => training.sessionId === selectedSessionId) ?? trainings[0] ?? null;
   const [marks, setMarks] = useState<Record<string, AttendanceMark>>(() => buildInitialMarks(trainings));
 
   const visibleAthletes = useMemo(() => {
@@ -68,8 +68,7 @@ export function AttendanceWorkflow({ trainings }: AttendanceWorkflowProps) {
 
     startTransition(async () => {
       const result = await markAttendanceEntryAction({
-        groupId: selectedTraining.groupId,
-        sessionDate: selectedTraining.session.sessionDate,
+        sessionId: selectedTraining.sessionId,
         athleteId,
         status: nextMark
       });
@@ -89,7 +88,7 @@ export function AttendanceWorkflow({ trainings }: AttendanceWorkflowProps) {
       <EmptyState
         icon={Clock3}
         title="Нема тренинзи денес"
-        description="Кога ќе постои активен распоред за денес, тренинзите ќе се појават овде."
+        description="Кога ќе се генерира месечниот распоред, денешните тренинзи ќе се појават овде."
       />
     );
   }
@@ -98,13 +97,13 @@ export function AttendanceWorkflow({ trainings }: AttendanceWorkflowProps) {
     <div className="space-y-lg">
       <section className="grid gap-sm sm:grid-cols-2 xl:grid-cols-3" aria-label="Избор на тренинг">
         {trainings.map((training) => {
-          const selected = training.groupId === selectedTraining?.groupId;
+          const selected = training.sessionId === selectedTraining?.sessionId;
 
           return (
             <button
-              key={training.groupId}
+              key={training.sessionId}
               type="button"
-              onClick={() => setSelectedGroupId(training.groupId)}
+              onClick={() => setSelectedSessionId(training.sessionId)}
               className={cn(
                 "rounded-card border p-md text-left shadow-soft transition-all duration-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
                 selected ? "border-primary/30 bg-slate-950 text-white shadow-raised" : "border-border bg-surface text-foreground hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-surface"
@@ -114,7 +113,10 @@ export function AttendanceWorkflow({ trainings }: AttendanceWorkflowProps) {
               <div className="flex items-center justify-between gap-md">
                 <div className="min-w-0">
                   <p className={cn("truncate text-section-title font-semibold", selected ? "text-white" : "text-foreground")}>{training.groupName}</p>
-                  <p className={cn("mt-xs text-body", selected ? "text-slate-300" : "text-muted-foreground")}>{training.trainingTime}</p>
+                  <p className={cn("mt-xs text-body", selected ? "text-slate-300" : "text-muted-foreground")}>
+                    {training.trainingTime}
+                    {training.sessionType === "extra" ? " · дополнителен" : null}
+                  </p>
                 </div>
                 <div className={cn("rounded-full border px-3 py-1 text-caption font-semibold", selected ? "border-gold/30 bg-gold/15 text-gold" : "border-border bg-muted text-muted-foreground")}>
                   {training.expectedAthletes} спортисти
@@ -133,7 +135,9 @@ export function AttendanceWorkflow({ trainings }: AttendanceWorkflowProps) {
                 <div>
                   <Badge tone="primary">Брз режим</Badge>
                   <h2 className="mt-sm text-section-title font-semibold text-foreground">{selectedTraining.groupName}</h2>
-                  <p className="mt-xs text-body text-muted-foreground">{selectedTraining.trainingTime} · сите се присутни додека не означите отсутен</p>
+                  <p className="mt-xs text-body text-muted-foreground">
+                    {selectedTraining.trainingTime} · сите се присутни додека не означите отсутен
+                  </p>
                 </div>
                 <div className="inline-flex items-center gap-xs rounded-full border border-border bg-surface px-3 py-1 text-caption font-semibold text-muted-foreground shadow-soft">
                   <span className={cn("h-2 w-2 rounded-full", isPending ? "bg-warning-foreground" : "bg-success-foreground")} aria-hidden="true" />
@@ -177,7 +181,7 @@ export function AttendanceWorkflow({ trainings }: AttendanceWorkflowProps) {
                 <EmptyState
                   icon={Users}
                   title="Нема спортисти во оваа група"
-                  description="Кога спортистите ќе бидат распределени во групата, ќе се појават во списокот за присуство."
+                  description="Кога спортистите ќе бидат распоредени во групата, ќе се појават во списокот за присуство."
                 />
               ) : visibleAthletes.length === 0 ? (
                 <EmptyState
